@@ -1,0 +1,12 @@
+{
+  "editor.tabSize": 2,
+  "editor.rulers": [100, 120],
+
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "always"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "highen",
+  "description": "🚀 Fast, safe and modern",
+  "keywords": [
+    "nodejs",
+    "fast",
+    "performance",
+    "secure"
+  ],
+  "version": "0.0.0-beta.1",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "prebuild": "rimraf dist",
+    "build": "tsc -p tsconfig.build.json",
+    "postbuild": "tsc-alias -f -p tsconfig.build.json",
+    "lint": "eslint . --cache",
+    "test": "jest --passWithNoTests",
+    "test:ci": "jest --passWithNoTests --ci",
+    "test:watch": "jest --passWithNoTests --watch",
+    "test:watchAll": "jest --passWithNoTests --watchAll",
+    "test:coverage": "jest --passWithNoTests --coverage",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.4.3",
+    "@commitlint/config-conventional": "^20.4.3",
+    "@eslint/js": "^10.0.1",
+    "@jest/globals": "^30.2.0",
+    "@swc/jest": "^0.2.39",
+    "@types/node": "^25.3.3",
+    "eslint": "^10.0.2",
+    "eslint-plugin-jest": "^29.15.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "globals": "^17.4.0",
+    "husky": "^9.1.7",
+    "jest": "^30.2.0",
+    "prettier": "^3.8.1",
+    "rimraf": "^6.1.3",
+    "tsc-alias": "^1.8.16",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  },
+  "author": {
+    "name": "Luciano Alves",
+    "url": "https://github.com/luas10c"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luas10c/highen.git"
+  },
+  "bugs": {
+    "url": "https://github.com/luas10c/highen/issues"
+  },
+  "engines": {
+    "node": "^20.x || ^22.x || ^24.x"
+  },
+  "license": "MIT"
+}
