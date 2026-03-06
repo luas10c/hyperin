@@ -4,8 +4,10 @@ import http from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { highen } from '#/instance'
-import { cors, json, urlencoded, multipart } from '#/middleware'
+import { hyperin } from '#/instance'
+import { cors } from '#/cors'
+import { json, urlencoded } from '#/body'
+import { multipart } from '#/multipart'
 
 // ─────────────────────────────────────────────────────────────
 // HTTP test helper (same as instance.test.ts)
@@ -59,7 +61,7 @@ function request(
   })
 }
 
-function startServer(app: ReturnType<typeof highen>): Promise<http.Server> {
+function startServer(app: ReturnType<typeof hyperin>): Promise<http.Server> {
   return new Promise((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server))
   })
@@ -102,10 +104,10 @@ function buildMultipartBody(
 
 describe('cors()', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     server = await startServer(app)
   })
 
@@ -261,10 +263,10 @@ describe('cors()', () => {
 
 describe('json()', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     app.use(json())
     app.post('/echo', async ({ request }) => request.body)
     server = await startServer(app)
@@ -285,7 +287,7 @@ describe('json()', () => {
   })
 
   it('skips non-JSON content-type', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(json())
     app2.post('/check', async ({ request: req }) => ({
       hasBody: req.body !== undefined
@@ -322,7 +324,7 @@ describe('json()', () => {
   })
 
   it('allows primitive in non-strict mode', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(json({ strict: false }))
     app2.post('/echo', async ({ request: req }) => ({ val: req.body }))
     const server2 = await startServer(app2)
@@ -337,7 +339,7 @@ describe('json()', () => {
   })
 
   it('returns 413 when body exceeds limit', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(json({ limit: '10b' }))
     app2.post('/echo', async ({ request }) => request.body)
     const server2 = await startServer(app2)
@@ -352,7 +354,7 @@ describe('json()', () => {
   })
 
   it('passes empty body through without setting req.body', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(json())
     app2.post('/check', async ({ request: req }) => ({
       hasBody: req.body !== undefined
@@ -380,7 +382,7 @@ describe('json()', () => {
 
   it('calls verify hook before parsing', async () => {
     let verifiedBuf = ''
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(
       json({
         verify: (_req, _res, buf) => {
@@ -407,10 +409,10 @@ describe('json()', () => {
 
 describe('urlencoded()', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     app.use(urlencoded())
     app.post('/echo', async ({ request }) => request.body)
     server = await startServer(app)
@@ -461,7 +463,7 @@ describe('urlencoded()', () => {
   })
 
   it('skips non-urlencoded content-type', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(urlencoded())
     app2.post('/check', async ({ request: req }) => ({
       has: req.body !== undefined
@@ -478,7 +480,7 @@ describe('urlencoded()', () => {
   })
 
   it('parses nested objects with extended: true', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(urlencoded({ extended: true }))
     app2.post('/echo', async ({ request }) => request.body)
     const server2 = await startServer(app2)
@@ -496,7 +498,7 @@ describe('urlencoded()', () => {
   })
 
   it('parses arrays with extended: true', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(urlencoded({ extended: true }))
     app2.post('/echo', async ({ request }) => request.body)
     const server2 = await startServer(app2)
@@ -511,7 +513,7 @@ describe('urlencoded()', () => {
   })
 
   it('returns 413 when body exceeds limit', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(urlencoded({ limit: '10b' }))
     app2.post('/echo', async ({ request }) => request.body)
     const server2 = await startServer(app2)
@@ -532,12 +534,12 @@ describe('urlencoded()', () => {
 
 describe('multipart()', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
   let tmpDir: string
 
   beforeEach(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'highen-mw-test-'))
-    app = highen()
+    tmpDir = mkdtempSync(join(tmpdir(), 'hyperin-mw-test-'))
+    app = hyperin()
     app.use(multipart({ dest: tmpDir }))
     app.post('/upload', async ({ request: req }) => ({
       fields: req.body,
@@ -626,7 +628,7 @@ describe('multipart()', () => {
   })
 
   it('skips non-multipart requests', async () => {
-    const app2 = highen()
+    const app2 = hyperin()
     app2.use(multipart({ dest: tmpDir }))
     app2.post('/check', async ({ request: req }) => ({
       body: req.body ?? null

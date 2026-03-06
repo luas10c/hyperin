@@ -120,7 +120,7 @@ describe('parseMultipart', () => {
   let tmpDir: string
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'highen-test-'))
+    tmpDir = mkdtempSync(join(tmpdir(), 'hyperin-test-'))
   })
 
   afterEach(() => {

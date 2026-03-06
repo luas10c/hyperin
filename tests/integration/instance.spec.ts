@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, it, expect } from '@jest/globals'
 import http from 'node:http'
-import { highen, type Handler } from '#/instance'
+import { hyperin, type Handler } from '#/instance'
 
 // ─────────────────────────────────────────────────────────────
 // HTTP test helper
@@ -54,7 +54,7 @@ function request(
   })
 }
 
-function startServer(app: ReturnType<typeof highen>): Promise<http.Server> {
+function startServer(app: ReturnType<typeof hyperin>): Promise<http.Server> {
   return new Promise((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server))
   })
@@ -72,10 +72,10 @@ function stopServer(server: http.Server): Promise<void> {
 
 describe('Routing', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     server = await startServer(app)
   })
 
@@ -114,7 +114,7 @@ describe('Routing', () => {
   })
 
   it('POST route receives body via middleware', async () => {
-    const { json: jsonMw } = await import('#/middleware')
+    const { json: jsonMw } = await import('#/body')
     app.use(jsonMw())
     app.post('/echo', async ({ request: req }) => req.body)
     const res = await request(server, {
@@ -185,10 +185,10 @@ describe('Routing', () => {
 
 describe('Middleware chain', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     server = await startServer(app)
   })
 
@@ -269,10 +269,10 @@ describe('Middleware chain', () => {
 
 describe('Error handling', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     server = await startServer(app)
   })
 
@@ -321,10 +321,10 @@ describe('Error handling', () => {
 
 describe('Response methods', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     server = await startServer(app)
   })
 
@@ -418,10 +418,10 @@ describe('Response methods', () => {
 
 describe('Request properties', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     server = await startServer(app)
   })
 
@@ -442,7 +442,7 @@ describe('Request properties', () => {
   })
 
   it('req.is() checks content-type', async () => {
-    const { json: jsonMw } = await import('#/middleware')
+    const { json: jsonMw } = await import('#/body')
     app.use(jsonMw())
     app.post('/check', async ({ request: req }) => ({
       isJson: req.is('application/json')
@@ -474,10 +474,10 @@ describe('Request properties', () => {
 
 describe('mount() and route()', () => {
   let server: http.Server
-  let app: ReturnType<typeof highen>
+  let app: ReturnType<typeof hyperin>
 
   beforeEach(async () => {
-    app = highen()
+    app = hyperin()
     server = await startServer(app)
   })
 
@@ -486,7 +486,7 @@ describe('mount() and route()', () => {
   })
 
   it('mount() merges sub-app routes under prefix', async () => {
-    const sub = highen()
+    const sub = hyperin()
     sub.get('/hello', async () => ({ from: 'sub' }))
     app.mount('/api', sub)
     const res = await request(server, { path: '/api/hello' })
