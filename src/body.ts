@@ -1,16 +1,7 @@
-import { existsSync, mkdirSync, type Stats } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { readBody, decompressStream, parseLimit } from './util'
 
-import {
-  parseLimit,
-  readBody,
-  decompressStream,
-  parseMultipart,
-  pipeFile
-} from './util'
-
-import type { Request, Response } from './instance'
+import type { Request } from './request'
+import type { Response } from './response'
 
 type NextFunction = () => void | Promise<void>
 
@@ -22,201 +13,6 @@ type HandlerContext = {
 type MiddlewareContext = HandlerContext & { next: NextFunction }
 
 type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
-
-// ─────────────────────────────────────────────────────────────
-// CORS
-// ─────────────────────────────────────────────────────────────
-
-export interface CorsOptions {
-  /**
-   * string     → origin fixo, ex: 'http://example.com'
-   * string[]   → lista de origens permitidas
-   * RegExp     → testa a origem
-   * true       → reflete a origem da requisição (equivale a '*' com credenciais)
-   * false      → desabilita CORS completamente
-   * function   → callback(origin, cb) assíncrono, igual ao express/cors
-   */
-  origin?:
-    | string
-    | string[]
-    | RegExp
-    | boolean
-    | ((
-        origin: string | undefined,
-        cb: (err: Error | null, allow?: boolean | string) => void
-      ) => void)
-
-  methods?: string | string[]
-  allowedHeaders?: string | string[]
-  exposedHeaders?: string | string[]
-  credentials?: boolean
-  maxAge?: number
-  preflightContinue?: boolean
-  optionsSuccessStatus?: number
-}
-
-const DEFAULT_CORS: Required<CorsOptions> = {
-  origin: '*',
-  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  allowedHeaders: '', // vazio = reflete Access-Control-Request-Headers
-  exposedHeaders: '',
-  credentials: false,
-  maxAge: 0,
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-}
-
-// Normaliza string|string[] para string
-function toHeaderValue(v: string | string[]): string {
-  return Array.isArray(v) ? v.join(', ') : v
-}
-
-// Resolve a origem — retorna a string a usar ou false para bloquear
-function resolveOrigin(
-  origin: CorsOptions['origin'],
-  reqOrigin: string | undefined
-): Promise<string | false> {
-  return new Promise((resolve, reject) => {
-    if (origin === '*') {
-      return resolve('*')
-    }
-
-    if (origin === false) {
-      return resolve(false)
-    }
-
-    // true → reflete a origem do request (ou '*' se não vier origem)
-    if (origin === true) {
-      return resolve(reqOrigin || '*')
-    }
-
-    if (typeof origin === 'string') {
-      return resolve(reqOrigin === origin ? origin : false)
-    }
-
-    if (origin instanceof RegExp) {
-      return resolve(reqOrigin && origin.test(reqOrigin) ? reqOrigin : false)
-    }
-
-    if (Array.isArray(origin)) {
-      return resolve(
-        reqOrigin &&
-          origin.some((o: RegExp | string) =>
-            o instanceof RegExp ? o.test(reqOrigin) : o === reqOrigin
-          )
-          ? reqOrigin
-          : false
-      )
-    }
-
-    if (typeof origin === 'function') {
-      return origin(reqOrigin, (err, result) => {
-        if (err) return reject(err)
-
-        if (result === true) return resolve(reqOrigin || '*')
-        if (result === false) return resolve(false)
-        if (typeof result === 'string') return resolve(result)
-
-        // result pode ser qualquer tipo permitido por CorsOptions['origin']
-        resolveOrigin(result as CorsOptions['origin'], reqOrigin)
-          .then(resolve)
-          .catch(reject)
-      })
-    }
-
-    resolve(false)
-  })
-}
-
-export function cors(options: CorsOptions = {}): Middleware {
-  const cfg = { ...DEFAULT_CORS, ...options }
-
-  return async ({ request, response, next }) => {
-    const reqOrigin = request.headers['origin'] as string | undefined
-    const methods = toHeaderValue(cfg.methods)
-
-    const allowOrigin = await resolveOrigin(cfg.origin, reqOrigin)
-
-    // ── Preflight (OPTIONS) ────────────────────────────────────
-    if (request.method === 'OPTIONS') {
-      if (allowOrigin === false) {
-        // origem não permitida — deixa passar para o próximo handler
-        if (cfg.preflightContinue) return void (await next())
-        return void response.status(cfg.optionsSuccessStatus).send()
-      }
-
-      response.header('Access-Control-Allow-Origin', allowOrigin)
-
-      // Vary: Origin sempre que não for '*'
-      if (allowOrigin !== '*') {
-        response.header('Vary', 'Origin')
-      }
-
-      if (cfg.credentials) {
-        response.header('Access-Control-Allow-Credentials', 'true')
-      }
-
-      response.header('Access-Control-Allow-Methods', methods)
-
-      // allowedHeaders: usa o que veio no request se não foi configurado
-      const allowedHeaders = cfg.allowedHeaders
-        ? toHeaderValue(cfg.allowedHeaders)
-        : (request.headers['access-control-request-headers'] as
-            | string
-            | undefined) || ''
-
-      if (allowedHeaders) {
-        response.header('Access-Control-Allow-Headers', allowedHeaders)
-        // Vary: Access-Control-Request-Headers se refletiu os headers do request
-        if (!cfg.allowedHeaders) {
-          const vary = response.getHeader('Vary')
-          response.header(
-            'Vary',
-            vary
-              ? `${vary}, Access-Control-Request-Headers`
-              : 'Access-Control-Request-Headers'
-          )
-        }
-      }
-
-      if (cfg.maxAge) {
-        response.header('Access-Control-Max-Age', String(cfg.maxAge))
-      }
-
-      if (cfg.preflightContinue) {
-        return void (await next())
-      }
-
-      return void response.status(cfg.optionsSuccessStatus).send()
-    }
-
-    // ── Requisição normal ──────────────────────────────────────
-    if (allowOrigin === false) {
-      return void (await next()) // não bloqueia — só não seta os headers
-    }
-
-    response.header('Access-Control-Allow-Origin', allowOrigin)
-
-    if (allowOrigin !== '*') {
-      response.header('Vary', 'Origin')
-    }
-
-    if (cfg.credentials) {
-      response.header('Access-Control-Allow-Credentials', 'true')
-    }
-
-    const exposed = toHeaderValue(cfg.exposedHeaders)
-    if (exposed) {
-      response.header('Access-Control-Expose-Headers', exposed)
-    }
-
-    await next()
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Body Parser
-// ─────────────────────────────────────────────────────────────
 
 export interface BodyParserOptions {
   /** Tamanho máximo do body. Ex: '100kb', '1mb'. Default: '100kb' */
@@ -363,7 +159,15 @@ export function json(options: JsonOptions = {}): Middleware {
   const type = options.type ?? 'application/json'
 
   return async ({ request, response, next }) => {
-    // 1. Só processa se o Content-Type bater
+    // 0. Skip rápido se não há body esperado (GET, HEAD, etc.)
+    if (
+      !request.headers['content-length'] &&
+      !request.headers['transfer-encoding']
+    ) {
+      return void (await next())
+    }
+
+    // 1. Only processes if the Content-Type matches.
     if (!matchesType(request, type)) {
       return void (await next())
     }
@@ -572,6 +376,14 @@ export function urlencoded(options: UrlencodedOptions = {}): Middleware {
   const type = options.type ?? 'application/x-www-form-urlencoded'
 
   return async ({ request, response, next }) => {
+    // 0. Skip quickly if there is no expected body (GET, HEAD, etc.)
+    if (
+      !request.headers['content-length'] &&
+      !request.headers['transfer-encoding']
+    ) {
+      return void (await next())
+    }
+
     // 1. Content-Type
     if (!matchesType(request, type)) {
       return void (await next())
@@ -634,152 +446,5 @@ export function urlencoded(options: UrlencodedOptions = {}): Middleware {
     }
 
     await next()
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Multipart
-// ─────────────────────────────────────────────────────────────
-
-export interface MultipartOptions {
-  dest?: string
-  limits?: {
-    fileSize?: number
-    files?: number
-    fields?: number
-  }
-}
-
-export function multipart(options: MultipartOptions = {}): Middleware {
-  const dest = options.dest || './uploads'
-  const limits = options.limits || {}
-
-  if (!existsSync(dest)) {
-    mkdirSync(dest, { recursive: true })
-  }
-
-  return async ({ request, response, next }) => {
-    const ct = request.headers['content-type'] || ''
-    if (!ct.includes('multipart/form-data')) {
-      await next()
-      return
-    }
-
-    const boundaryMatch = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
-    const boundary = boundaryMatch?.[1] || boundaryMatch?.[2]
-
-    if (!boundary) {
-      return void response.status(400).json({
-        statusCode: 400,
-        error: 'Missing multipart boundary',
-        method: request.method
-      })
-    }
-
-    try {
-      const { fields, files } = await parseMultipart(
-        request,
-        boundary,
-        dest,
-        limits
-      )
-      request.body = fields
-      request.files = files
-    } catch (err) {
-      if (err instanceof Error) {
-        return void response
-          .status(400)
-          .json({ statusCode: 400, error: err.message, method: request.method })
-      }
-    }
-
-    await next()
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Static file serving
-// ─────────────────────────────────────────────────────────────
-
-export interface StaticOptions {
-  /** Serve index.html for directory requests (default: true) */
-  index?: boolean | string
-  /** Set max-age for Cache-Control in seconds (default: 0) */
-  maxAge?: number
-  /** Add ETag header (default: true) */
-  etag?: boolean
-  /** Dotfiles: 'allow' | 'deny' | 'ignore' (default: 'ignore') */
-  dotfiles?: 'allow' | 'deny' | 'ignore'
-}
-
-export function serveStatic(
-  directory: string,
-  options: StaticOptions = {}
-): Middleware {
-  const { index = true, maxAge = 0, etag = true, dotfiles = 'ignore' } = options
-
-  return async ({ request, response }) => {
-    // request.path já chegou stripado pelo use() — ex: '/foto.jpg' em vez de '/uploads/foto.jpg'
-    const urlPath = decodeURIComponent(request.path || '/')
-
-    // Previne path traversal
-    const filePath = resolve(join(directory, urlPath))
-    if (!filePath.startsWith(directory)) {
-      return void response
-        .status(403)
-        .json({ statusCode: 403, error: 'Forbidden', method: request.method })
-    }
-
-    // Dotfiles
-    const hasDot = urlPath
-      .split('/')
-      .some((s) => s.startsWith('.') && s.length > 1)
-    if (hasDot) {
-      if (dotfiles === 'deny') {
-        return void response
-          .status(403)
-          .json({ statusCode: 403, error: 'Forbidden', method: request.method })
-      }
-      if (dotfiles === 'ignore') {
-        return void response
-          .status(404)
-          .json({ statusCode: 404, error: 'Not Found', method: request.method })
-      }
-    }
-
-    let fileStat: Stats
-    try {
-      fileStat = await stat(filePath)
-    } catch {
-      return void response
-        .status(404)
-        .json({ statusCode: 404, error: 'Not Found', method: request.method })
-    }
-
-    // Diretório → tenta servir index
-    if (fileStat.isDirectory()) {
-      if (!index) {
-        return void response
-          .status(404)
-          .json({ statusCode: 404, error: 'Not Found', method: request.method })
-      }
-      const indexFile = index === true ? 'index.html' : index
-      const indexPath = join(filePath, indexFile)
-      let indexStat: Stats
-      try {
-        indexStat = await stat(indexPath)
-      } catch {
-        return void response
-          .status(404)
-          .json({ statusCode: 404, error: 'Not Found', method: request.method })
-      }
-
-      return void pipeFile(indexPath, indexStat, request, response, {
-        maxAge,
-        etag
-      })
-    }
-
-    pipeFile(filePath, fileStat, request, response, { maxAge, etag })
   }
 }
