@@ -9,7 +9,8 @@ import { createWriteStream, createReadStream, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
 import type { IncomingMessage } from 'node:http'
 
-import type { Request, Response } from './instance'
+import type { Request } from './request'
+import type { Response } from './response'
 
 export interface UploadedFile {
   fieldname: string
@@ -112,7 +113,13 @@ export async function parseMultipart(
   }
 
   const rawChunks: Buffer[] = []
+  let totalSize = 0
   for await (const chunk of stream) {
+    totalSize += chunk.length
+    if (limits.fileSize && totalSize > limits.fileSize) {
+      throw new Error('File size limit exceeded')
+    }
+
     rawChunks.push(chunk)
   }
   const buf = Buffer.concat(rawChunks)

@@ -1,10 +1,16 @@
-import riseway from './instance'
-import { cors, json, urlencoded, multipart, serveStatic } from './middleware'
+import instance from './instance'
+import { cors } from './cors'
+import { json, urlencoded } from './body'
+import { multipart } from './multipart'
+import { serveStatic } from './serve-static'
 
 export * from './instance'
-export * from './middleware'
+export * from './cors'
+export * from './body'
+export * from './multipart'
+export * from './serve-static'
 
-const highen = Object.assign(riseway, {
+const hyperin = Object.assign(instance, {
   cors,
   json,
   urlencoded,
@@ -12,4 +18,4 @@ const highen = Object.assign(riseway, {
   static: serveStatic
 })
 
-export default highen
+export default hyperin

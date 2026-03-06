@@ -1,5 +1,5 @@
-import { LRUCache } from './cache'
-import type { Request, Response } from './instance'
+import type { Request } from './request'
+import type { Response } from './response'
 
 type NextFunction = () => void | Promise<void>
 
@@ -57,8 +57,42 @@ function createNode(): TrieNode {
 
 export interface MatchResult {
   handlers: Handler[]
+  middlewares: Handler[]
   params: Record<string, string>
   matched: boolean
+}
+
+/** Cache para não re-executar toString + regex na mesma função */
+const errorMwCache = new WeakMap<object, boolean>()
+
+/**
+ * Detecta se a função é um ErrorMiddleware inspecionando o primeiro parâmetro.
+ * Cobre dois padrões:
+ *  1. Desestruturação nativa:  ({ error, ... }) =>
+ *  2. Compilado TS/Babel:      function(_a) { var error = _a.error  /  let { error } = _ref
+ * Resultado cacheado em WeakMap — custo pago uma única vez por função registrada.
+ */
+function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
+  const cached = errorMwCache.get(fn)
+  if (cached !== undefined) return cached
+
+  const src = fn.toString()
+
+  // Padrão 1: desestruturação nativa no primeiro parâmetro — ({ error, ... })
+  const nativeMatch = src.match(/^[^(]*\(\s*\{([^}]*)/)
+  if (nativeMatch) {
+    const result = /\berror\b/.test(nativeMatch[1])
+    errorMwCache.set(fn, result)
+    return result
+  }
+
+  // Padrão 2: código compilado pelo TypeScript/Babel
+  //   function(_a) { var error = _a.error ... }
+  //   (_ref) => { let { error } = _ref ... }
+  const result = /\b(?:var|let|const)\s+(?:\{[^}]*\berror\b|error\s*=)/.test(
+    src
+  )
+  return result
 }
 
 export class RadixRouter {
@@ -66,7 +100,6 @@ export class RadixRouter {
   private readonly middlewares: Handler[] = []
   private readonly _errorMiddlewares: ErrorMiddleware[] = []
   private readonly _routes: [HttpMethod, string, Handler[]][] = []
-  readonly #cache = new LRUCache<string, MatchResult | null>(512)
 
   get routes(): [HttpMethod, string, Handler[]][] {
     return this._routes
@@ -79,14 +112,7 @@ export class RadixRouter {
   use(middleware: Handler): void
   use(middleware: ErrorMiddleware): void
   use(middleware: Handler | ErrorMiddleware): void {
-    const src = middleware.toString()
-    // captura o primeiro parâmetro e checa se desestrutura `error`
-    const firstParam = src.match(
-      /^(?:async\s*)?\(?(?:function\s*)?\w*\s*\(?\s*(\{[^)]+\})/
-    )
-    const isError = firstParam ? /\berror\b/.test(firstParam[1]) : false
-
-    if (isError) {
+    if (isErrorMiddleware(middleware)) {
       this.errorMiddlewares.push(middleware as ErrorMiddleware)
     } else {
       this.middlewares.push(middleware as Handler)
@@ -123,11 +149,6 @@ export class RadixRouter {
   }
 
   match(method: string, path: string): MatchResult | null {
-    const key = `${method}:${path}`
-
-    const cached = this.#cache.get(key)
-    if (this.#cache.has(key)) return cached!
-
     const params: Record<string, string> = {}
     const node = this.#traverse(
       this.root,
@@ -142,15 +163,20 @@ export class RadixRouter {
 
     const result: MatchResult | null = routeHandlers
       ? {
-          handlers: [...this.middlewares, ...routeHandlers],
+          handlers: routeHandlers,
+          middlewares: this.middlewares,
           params,
           matched: true
         }
       : this.middlewares.length > 0
-        ? { handlers: [...this.middlewares], params: {}, matched: false }
+        ? {
+            handlers: [],
+            middlewares: this.middlewares,
+            params: {},
+            matched: false
+          }
         : null
 
-    this.#cache.set(key, result)
     return result
   }
 
@@ -174,8 +200,10 @@ export class RadixRouter {
 
     // 2. Param match
     if (node.paramChild) {
-      const savedParams = { ...params }
-      params[node.paramChild.paramName!] = segment
+      const paramName = node.paramChild.paramName!
+      const hadKey = paramName in params
+      const prevValue = params[paramName]
+      params[paramName] = segment
       const result = this.#traverse(
         node.paramChild,
         segments,
@@ -183,10 +211,12 @@ export class RadixRouter {
         params
       )
       if (result) return result
-      // Restore params on backtrack
-      Object.keys(params).forEach((k) => {
-        if (!(k in savedParams)) delete params[k]
-      })
+      // Restore params on backtrack — without allocating an object
+      if (hadKey) {
+        params[paramName] = prevValue
+      } else {
+        delete params[paramName]
+      }
     }
 
     // 3. Wildcard match
