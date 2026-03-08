@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import type { Readable } from 'node:stream'
 
 import { parseMultipart } from './util'
 
@@ -16,8 +16,45 @@ type MiddlewareContext = HandlerContext & { next: NextFunction }
 
 type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
 
+export type FileInfo = {
+  filename: string
+  mimetype: string
+  encoding: string
+  fieldname: string
+  size: number
+}
+
+export type FileHandler = (
+  stream: Readable,
+  info: FileInfo
+) => Promise<unknown> | unknown
+
 export interface MultipartOptions {
-  dest?: string
+  /**
+   * Função chamada para cada arquivo recebido.
+   * Recebe a stream do arquivo e metadados.
+   * O valor retornado é disponibilizado em `request.files[fieldname]`.
+   *
+   * @example Upload para S3
+   * ```ts
+   * onFile: async (stream, info) => {
+   *   const upload = new Upload({
+   *     client: s3,
+   *     params: { Bucket: 'my-bucket', Key: info.filename, Body: stream }
+   *   })
+   *   return upload.done() // { Location, Key, ... }
+   * }
+   * ```
+   *
+   * @example Salvar localmente (comportamento antigo)
+   * ```ts
+   * onFile: (stream, info) => {
+   *   const dest = path.join('./uploads', info.filename)
+   *   stream.pipe(fs.createWriteStream(dest))
+   * }
+   * ```
+   */
+  onFile?: FileHandler
   limits?: {
     fileSize?: number
     files?: number
@@ -26,21 +63,16 @@ export interface MultipartOptions {
 }
 
 export function multipart(options: MultipartOptions = {}): Middleware {
-  const dest = options.dest || './uploads'
-  const limits = options.limits || {}
-
-  if (!existsSync(dest)) {
-    mkdirSync(dest, { recursive: true })
-  }
+  const { onFile, limits = {} } = options
 
   return async ({ request, response, next }) => {
-    const ct = request.headers['content-type'] || ''
-    if (!ct.includes('multipart/form-data')) {
-      await next()
-      return
+    const contentType = request.headers['content-type'] || ''
+
+    if (!contentType.includes('multipart/form-data')) {
+      return void (await next())
     }
 
-    const boundaryMatch = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
+    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
     const boundary = boundaryMatch?.[1] || boundaryMatch?.[2]
 
     if (!boundary) {
@@ -55,17 +87,21 @@ export function multipart(options: MultipartOptions = {}): Middleware {
       const { fields, files } = await parseMultipart(
         request,
         boundary,
-        dest,
-        limits
+        limits,
+        onFile
       )
+
       request.body = fields
       request.files = files
     } catch (err) {
-      if (err instanceof Error) {
-        return void response
-          .status(400)
-          .json({ statusCode: 400, error: err.message, method: request.method })
-      }
+      const message =
+        err instanceof Error ? err.message : 'Multipart parsing failed'
+
+      return void response.status(400).json({
+        statusCode: 400,
+        error: message,
+        method: request.method
+      })
     }
 
     await next()

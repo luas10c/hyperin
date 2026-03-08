@@ -4,13 +4,25 @@ import {
   createBrotliDecompress,
   type Gunzip
 } from 'node:zlib'
-import { type Readable } from 'node:stream'
-import { createWriteStream, createReadStream, statSync } from 'node:fs'
-import { join, extname } from 'node:path'
-import type { IncomingMessage } from 'node:http'
+import { Readable } from 'node:stream'
+import { createReadStream, statSync } from 'node:fs'
+import { extname } from 'node:path'
 
 import type { Request } from './request'
 import type { Response } from './response'
+
+import type { FileHandler, FileInfo } from './multipart'
+
+type ParseLimits = {
+  fileSize?: number
+  files?: number
+  fields?: number
+}
+
+type ParsedResult = {
+  fields: Record<string, string>
+  files: Record<string, unknown>
+}
 
 export interface UploadedFile {
   fieldname: string
@@ -20,6 +32,9 @@ export interface UploadedFile {
   size: number
   path: string
 }
+
+const CRLF = '\r\n'
+const DOUBLE_CRLF = '\r\n\r\n'
 
 // ─────────────────────────────────────────────────────────────
 // Body Parser
@@ -38,163 +53,129 @@ export function parseLimit(limit: string): number {
   return Math.floor(value * (units[match[2]?.toLowerCase() || 'b'] || 1))
 }
 
-export async function readBody(
+export function readBody(
   stream: Request | Readable | Gunzip,
   maxBytes: number
 ): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  let total = 0
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let total = 0
 
-  for await (const chunk of stream) {
-    total += chunk.length
-    if (total > maxBytes)
-      throw Object.assign(new Error('Payload Too Large'), { status: 413 })
-    chunks.push(chunk)
-  }
-
-  return Buffer.concat(chunks)
+    stream.on('data', (chunk: Buffer) => {
+      total += chunk.length
+      if (total > maxBytes) {
+        stream.destroy()
+        return reject(
+          Object.assign(new Error('Payload Too Large'), { status: 413 })
+        )
+      }
+      chunks.push(chunk)
+    })
+    stream.on('end', () => resolve(Buffer.concat(chunks)))
+    stream.on('error', reject)
+  })
 }
-
-function parsePartHeaders(raw: string): {
-  name: string
-  filename: string
-  contentType: string
-  encoding: string
-} {
-  const result = { name: '', filename: '', contentType: '', encoding: '' }
-  for (const line of raw.split('\r\n')) {
-    const ci = line.indexOf(':')
-    if (ci === -1) continue
-    const key = line.slice(0, ci).trim().toLowerCase()
-    const val = line.slice(ci + 1).trim()
-    if (key === 'content-disposition') {
-      const name = val.match(/name="([^"]+)"/)
-      const fname = val.match(/filename="([^"]+)"/)
-      if (name) result.name = name[1]
-      if (fname) result.filename = fname[1]
-    } else if (key === 'content-type') {
-      result.contentType = val
-    } else if (key === 'content-transfer-encoding') {
-      result.encoding = val
-    }
-  }
-  return result
-}
-
-interface ParseResult {
-  fields: Record<string, string>
-  files: Record<string, UploadedFile>
-}
-
-//
 
 export async function parseMultipart(
-  stream: IncomingMessage,
+  request: Request,
   boundary: string,
-  dest: string,
-  limits: { fileSize?: number; files?: number; fields?: number }
-): Promise<ParseResult> {
+  limits: ParseLimits = {},
+  onFile?: FileHandler
+): Promise<ParsedResult> {
   const fields: Record<string, string> = {}
-  const files: Record<string, UploadedFile> = {}
-  let fieldCount = 0
+  const files: Record<string, unknown> = {}
+
   let fileCount = 0
+  let fieldCount = 0
 
-  const boundaryBuf = Buffer.from(`--${boundary}`)
-  const headerEnd = Buffer.from('\r\n\r\n')
+  // Coleta o body inteiro em um Buffer
+  // (para streams grandes, considere um parser incremental como busboy)
+  const body = await new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    })
+    request.on('end', () => resolve(Buffer.concat(chunks)))
+    request.on('error', reject)
+  })
 
-  const indexOf = (haystack: Buffer, needle: Buffer, start: number): number => {
-    outer: for (let i = start; i <= haystack.length - needle.length; i++) {
-      for (let j = 0; j < needle.length; j++) {
-        if (haystack[i + j] !== needle[j]) continue outer
-      }
-      return i
+  const delimiter = Buffer.from(`--${boundary}`)
+  const parts = splitBuffer(body, delimiter)
+
+  for (const part of parts) {
+    // Ignora o epílogo (último "--")
+    if (part.equals(Buffer.from('--\r\n')) || part.equals(Buffer.from('--'))) {
+      continue
     }
-    return -1
-  }
 
-  const rawChunks: Buffer[] = []
-  let totalSize = 0
-  for await (const chunk of stream) {
-    totalSize += chunk.length
-    if (limits.fileSize && totalSize > limits.fileSize) {
-      throw new Error('File size limit exceeded')
-    }
+    // Remove o CRLF inicial de cada parte
+    const partContent = part.subarray(0, 2).equals(Buffer.from(CRLF))
+      ? part.subarray(2)
+      : part
 
-    rawChunks.push(chunk)
-  }
-  const buf = Buffer.concat(rawChunks)
+    // Separa headers do corpo da parte
+    const separatorIndex = indexOfDoubleNewline(partContent)
+    if (separatorIndex === -1) continue
 
-  // Encontra todas as posições dos boundaries
-  const boundaries: number[] = []
-  let searchFrom = 0
-  while (true) {
-    const pos = indexOf(buf, boundaryBuf, searchFrom)
-    if (pos === -1) break
-    boundaries.push(pos)
-    searchFrom = pos + boundaryBuf.length
-  }
+    const headerSection = partContent
+      .subarray(0, separatorIndex)
+      .toString('utf8')
 
-  for (let b = 0; b < boundaries.length; b++) {
-    const boundaryPos = boundaries[b]
-    const afterBoundary = boundaryPos + boundaryBuf.length
+    // +4 para pular o \r\n\r\n
+    const bodyBuffer = partContent.subarray(separatorIndex + 4)
+    // Remove o CRLF final do corpo
+    const bodyContent = partContent
+      .subarray(partContent.length - 2)
+      .equals(Buffer.from(CRLF))
+      ? bodyBuffer.subarray(0, bodyBuffer.length - 2)
+      : bodyBuffer
 
-    // -- no final = epilogue, para de processar
-    if (buf[afterBoundary] === 45 && buf[afterBoundary + 1] === 45) break
+    const headers = parseHeaders(headerSection)
+    const disposition = headers['content-disposition'] || ''
+    const fieldname = extractParam(disposition, 'name')
+    const filename = extractParam(disposition, 'filename')
 
-    // \r\n após o boundary
-    const partStart = afterBoundary + 2 // pula \r\n
+    if (!fieldname) continue
 
-    // Acha fim dos headers da parte
-    const headerEndPos = indexOf(buf, headerEnd, partStart)
-    if (headerEndPos === -1) continue
-
-    const hdrs = parsePartHeaders(
-      buf.subarray(partStart, headerEndPos).toString()
-    )
-    const contentStart = headerEndPos + headerEnd.length
-
-    // Fim do conteúdo = próximo boundary - 2 (o \r\n antes do --)
-    const contentEnd =
-      b + 1 < boundaries.length ? boundaries[b + 1] - 2 : buf.length
-
-    const data = buf.subarray(contentStart, contentEnd)
-
-    const field = hdrs.name
-    const filename = hdrs.filename
-    const mime = hdrs.contentType || 'application/octet-stream'
-    const encoding = hdrs.encoding || '7bit'
-
-    if (!field) continue
-
-    if (filename) {
+    if (filename !== null) {
+      // É um arquivo
       if (limits.files !== undefined && fileCount >= limits.files) {
-        throw new Error('Too many files')
+        throw new Error(`Too many files (limit: ${limits.files})`)
       }
 
-      const path = join(dest, `${Date.now()}-${filename}`)
-      await new Promise<void>((resolve, reject) => {
-        const ws = createWriteStream(path)
-        ws.write(data)
-        ws.end()
-        ws.on('finish', resolve)
-        ws.on('error', reject)
-      })
-
-      files[field] = {
-        fieldname: field,
-        filename,
-        encoding,
-        mimetype: mime,
-        size: data.length,
-        path
+      if (
+        limits.fileSize !== undefined &&
+        bodyContent.length > limits.fileSize
+      ) {
+        throw new Error(
+          `File "${filename}" exceeds size limit of ${limits.fileSize} bytes`
+        )
       }
+
       fileCount++
-    } else {
-      if (limits.fields !== undefined && fieldCount >= limits.fields) {
-        throw new Error('Too many fields')
+
+      const info: FileInfo = {
+        fieldname,
+        filename: filename || 'unnamed',
+        mimetype: headers['content-type'] || 'application/octet-stream',
+        encoding: headers['content-transfer-encoding'] || '7bit',
+        size: bodyContent.length
       }
-      fields[field] = data.toString('utf-8')
+
+      if (onFile) {
+        // Cria uma stream legível a partir do buffer e entrega ao handler
+        const stream = Readable.from(bodyContent)
+        files[fieldname] = await onFile(stream, info)
+      }
+      // Se não há onFile, o arquivo é simplesmente descartado
+    } else {
+      // É um campo de texto
+      if (limits.fields !== undefined && fieldCount >= limits.fields) {
+        throw new Error(`Too many fields (limit: ${limits.fields})`)
+      }
+
       fieldCount++
+      fields[fieldname] = bodyContent.toString('utf8')
     }
   }
 
@@ -292,4 +273,49 @@ export function decompressStream(req: Request) {
   if (encoding === 'br') return req.pipe(createBrotliDecompress())
 
   return req // sem compressão, passa direto
+}
+
+function splitBuffer(buffer: Buffer, delimiter: Buffer): Buffer[] {
+  const parts: Buffer[] = []
+  let start = 0
+
+  while (true) {
+    const idx = buffer.indexOf(delimiter, start)
+    if (idx === -1) {
+      parts.push(buffer.subarray(start))
+      break
+    }
+    parts.push(buffer.subarray(start, idx))
+    start = idx + delimiter.length
+  }
+
+  return parts.filter((part) => part.length > 0)
+}
+
+function indexOfDoubleNewline(buffer: Buffer): number {
+  const needle = Buffer.from(DOUBLE_CRLF)
+  return buffer.indexOf(needle)
+}
+
+function parseHeaders(raw: string): Record<string, string> {
+  const headers: Record<string, string> = {}
+  for (const line of raw.split(CRLF)) {
+    const colon = line.indexOf(':')
+    if (colon === -1) continue
+    const key = line.slice(0, colon).trim().toLowerCase()
+    const value = line.slice(colon + 1).trim()
+    headers[key] = value
+  }
+  return headers
+}
+
+function extractParam(header: string, param: string): string | null {
+  const regex = new RegExp(`${param}="([^"]*)"`, 'i')
+  const match = header.match(regex)
+  // filename pode existir sem aspas
+  if (!match && param === 'filename') {
+    const bare = header.match(/filename=([^;]+)/i)
+    return bare ? bare[1].trim() : null
+  }
+  return match ? match[1] : null
 }
