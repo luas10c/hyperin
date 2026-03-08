@@ -378,14 +378,34 @@ class Hyperin {
 
     // Mark the socket as busy while a request is in flight so shutdown()
     // knows not to destroy it before the response finishes.
-    this.#server.on('request', (req: IncomingMessage, res: ServerResponse) => {
-      const socket = req.socket as Socket & { _busy?: boolean }
-      socket._busy = true
-      res.once('finish', () => {
-        socket._busy = false
-      })
-      this.#dispatch(req, res)
-    })
+    this.#server.on(
+      'request',
+      async (request: IncomingMessage, response: ServerResponse) => {
+        const socket = request.socket as Socket & { _busy?: boolean }
+        socket._busy = true
+        response.once('finish', () => {
+          socket._busy = false
+        })
+
+        await this.#dispatch(request, response).catch((err) => {
+          console.error('[listen] uncaught dispatch error:', err)
+
+          if (!response.headersSent && !response.writableEnded) {
+            response.statusCode = 500
+            response.setHeader(
+              'Content-Type',
+              'application/json; charset=utf-8'
+            )
+            response.end(
+              JSON.stringify({
+                error:
+                  err instanceof Error ? err.message : 'Internal Server Error'
+              })
+            )
+          }
+        })
+      }
+    )
 
     const cb = callback || (() => {})
     if (hostname) {
@@ -499,9 +519,12 @@ class Hyperin {
   }
 
   /** Returns a Node.js-compatible request handler (for testing / serverless) */
-  get handler() {
-    return (req: IncomingMessage, res: ServerResponse) =>
-      this.#dispatch(req, res)
+  get handler(): (
+    request: IncomingMessage,
+    response: ServerResponse
+  ) => Promise<void> {
+    return async (request: IncomingMessage, response: ServerResponse) =>
+      await this.#dispatch(request, response)
   }
 }
 
