@@ -1,4 +1,9 @@
-import { readBody, decompressStream, parseLimit } from './util'
+import {
+  readBody,
+  getContentEncoding,
+  readDecodedBody,
+  parseLimit
+} from './util'
 
 import type { Request } from './request'
 import type { Response } from './response'
@@ -121,18 +126,19 @@ async function readRawBody(
   options: { inflate: boolean; limit: number }
 ): Promise<Buffer> {
   if (!options.inflate) {
-    const encoding = req.headers['content-encoding']?.toLowerCase()
-    if (encoding && encoding !== 'identity') {
-      const err = Object.assign(
+    const encoding = getContentEncoding(req)
+
+    if (encoding !== 'identity') {
+      throw Object.assign(
         new Error(`Unsupported Content-Encoding: ${encoding}`),
-        { status: 415, type: 'encoding.unsupported', charset: encoding }
+        { status: 415, type: 'encoding.unsupported' }
       )
-      throw err
     }
+
     return readBody(req, options.limit)
   }
 
-  return readBody(decompressStream(req), options.limit)
+  return readDecodedBody(req, options.limit)
 }
 
 /** Resolve o limite em bytes a partir de string ou number */

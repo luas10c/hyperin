@@ -10,6 +10,8 @@ import { Request } from './request'
 import { Response } from './response'
 import { RadixRouter } from './router'
 
+const HYPERIN_CORE = Symbol.for('hyperin.core')
+
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -37,6 +39,7 @@ export type ErrorContext = HandlerContext & {
 
 export type Handler = (ctx: HandlerContext) => HandlerReturn
 export type ErrorMiddleware = (ctx: ErrorContext) => void | Promise<void>
+export type AnyMiddleware = Handler | ErrorMiddleware
 
 export type HttpMethod =
   | 'GET'
@@ -120,10 +123,9 @@ class Hyperin {
   // Middleware
   // ──────────────────────────────────────────────
 
-  use(handler: ErrorMiddleware): this
-  use(handler: Handler): this
+  use(handler: AnyMiddleware): this
   use(path: string, ...handlers: Handler[]): this
-  use(path: string | Handler | ErrorMiddleware, ...handlers: Handler[]): this {
+  use(path: string | AnyMiddleware, ...handlers: Handler[]): this {
     if (typeof path === 'function') {
       // If it comes without ErrorMiddleware(), try a safe fallback based on rarity type.
       this.#router.use(path as Handler)
@@ -232,8 +234,14 @@ class Hyperin {
   }
 
   /** Mount a sub-router or Hyperin instance */
-  mount(prefix: string, app: Hyperin): this {
-    for (const [method, path, handlers] of app.#getRoutes()) {
+  mount(prefix: string, app: Hyperin | { [HYPERIN_CORE]?: Hyperin }): this {
+    const target = app instanceof Hyperin ? app : app?.[HYPERIN_CORE]
+
+    if (!(target instanceof Hyperin)) {
+      throw new TypeError('mount() expects an app created by hyperin()')
+    }
+
+    for (const [method, path, handlers] of target.#getRoutes()) {
       this.#router.add(method, prefix + path, handlers)
     }
     return this
@@ -528,8 +536,110 @@ class Hyperin {
   }
 }
 
-export function hyperin(): Hyperin {
-  return new Hyperin()
+export function hyperin() {
+  const core = new Hyperin()
+
+  // Cria o http.Server imediatamente com as classes customizadas.
+  // Isso é necessário para que supertest(app) receba um Server real
+  // e use Request/Response corretos, em vez de criar um http.createServer
+  // genérico internamente.
+  const server = createServer(
+    { IncomingMessage: Request, ServerResponse: Response },
+    async (req: IncomingMessage, res: ServerResponse) => {
+      await core.handler(req, res)
+    }
+  )
+
+  interface AppUse {
+    (handler: ErrorMiddleware): typeof app
+    (handler: Handler): typeof app
+    (path: string, ...handlers: Handler[]): typeof app
+  }
+
+  // O app é o próprio Server — assim supertest(app) funciona diretamente.
+  // Métodos de rota e middleware são adicionados via Object.assign.
+  const app = Object.assign(server, {
+    use: ((pathOrHandler: string | AnyMiddleware, ...handlers: Handler[]) => {
+      if (typeof pathOrHandler === 'string') {
+        core.use(pathOrHandler, ...handlers)
+      } else if (
+        typeof pathOrHandler === 'function' &&
+        pathOrHandler.length !== 1
+      ) {
+        core.use(pathOrHandler as ErrorMiddleware)
+        for (const h of handlers) core.use(h)
+      } else {
+        core.use(pathOrHandler as Handler)
+        for (const h of handlers) core.use(h)
+      }
+    }) as AppUse,
+    mount: (
+      prefix: string,
+      mounted: Hyperin | { [HYPERIN_CORE]?: Hyperin }
+    ) => {
+      core.mount(prefix, mounted)
+      return app
+    },
+    [HYPERIN_CORE]: core,
+    get: (path: string, ...h: Handler[]) => {
+      core.get(path, ...h)
+      return app
+    },
+    post: (path: string, ...h: Handler[]) => {
+      core.post(path, ...h)
+      return app
+    },
+    put: (path: string, ...h: Handler[]) => {
+      core.put(path, ...h)
+      return app
+    },
+    patch: (path: string, ...h: Handler[]) => {
+      core.patch(path, ...h)
+      return app
+    },
+    delete: (path: string, ...h: Handler[]) => {
+      core.delete(path, ...h)
+      return app
+    },
+    head: (path: string, ...h: Handler[]) => {
+      core.head(path, ...h)
+      return app
+    },
+    options: (path: string, ...h: Handler[]) => {
+      core.options(path, ...h)
+      return app
+    },
+    all: (path: string, ...h: Handler[]) => {
+      core.all(path, ...h)
+      return app
+    },
+    route: core.route.bind(core),
+    shutdown: core.shutdown.bind(core),
+    graceful: core.graceful.bind(core),
+    handler: core.handler
+  })
+
+  // listen() passa o hostname opcionalmente, mantendo a assinatura original.
+  const serverListen = server.listen.bind(server)
+
+  Object.assign(app, {
+    listen: (
+      port: number,
+      hostname?: string | (() => void),
+      callback?: () => void
+    ) => {
+      const cb = typeof hostname === 'function' ? hostname : callback
+      const host = typeof hostname === 'string' ? hostname : undefined
+      if (host) {
+        serverListen(port, host, cb)
+      } else {
+        serverListen(port, cb)
+      }
+      return server
+    }
+  })
+
+  return app
 }
 
 export default hyperin
