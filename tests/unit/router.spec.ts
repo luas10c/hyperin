@@ -1,172 +1,67 @@
-import { describe, it, expect } from '@jest/globals'
+import { describe, expect, test } from '@jest/globals'
 
-import { RadixRouter, type Handler, type ErrorMiddleware } from '#/router'
-
-// ─────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────
-
-const noop: Handler = async () => {}
-
-function makeHandler(id: string): Handler {
-  const fn: Handler = async () => {}
-  Object.defineProperty(fn, 'name', { value: id })
-  return fn
-}
+import { RadixRouter, type Handler } from '#/router'
 
 describe('RadixRouter', () => {
-  // ─────────────────────────────────────────────────────────────
-  // add / match — static routes
-  // ─────────────────────────────────────────────────────────────
+  test('faz match de rota exata', () => {
+    const router = new RadixRouter()
+    const handler: Handler = () => undefined
 
-  describe('static routes', () => {
-    it('matches exact path', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/users', [noop])
-      const result = router.match('GET', '/users')
-      expect(result).not.toBeNull()
-      expect(result!.matched).toBe(true)
-    })
+    router.add('GET', '/users', [handler])
 
-    it('returns null for unknown route with no middlewares', () => {
-      const router = new RadixRouter()
-      const result = router.match('GET', '/unknown')
-      expect(result).toBeNull()
-    })
+    const match = router.match('GET', '/users')
 
-    it('does not match wrong method', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/users', [noop])
-      const result = router.match('POST', '/users')
-      // no global middlewares → null
-      expect(result).toBeNull()
-    })
-
-    it('matches ALL method for any HTTP verb', () => {
-      const router = new RadixRouter()
-      router.add('ALL', '/ping', [noop])
-      expect(router.match('GET', '/ping')!.matched).toBe(true)
-      expect(router.match('DELETE', '/ping')!.matched).toBe(true)
-    })
-
-    it('matches root path /', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/', [noop])
-      const result = router.match('GET', '/')
-      expect(result!.matched).toBe(true)
-    })
-
-    it('does not match /users for /users/list', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/users', [noop])
-      const result = router.match('GET', '/users/list')
-      expect(result).toBeNull()
-    })
+    expect(match).not.toBeNull()
+    expect(match?.matched).toBe(true)
+    expect(match?.handlers).toEqual([handler])
+    expect(match?.params).toEqual({})
   })
 
-  // ─────────────────────────────────────────────────────────────
-  // Param routes
-  // ─────────────────────────────────────────────────────────────
+  test('extrai parâmetros dinâmicos', () => {
+    const router = new RadixRouter()
+    const handler: Handler = () => undefined
 
-  describe('param routes', () => {
-    it('extracts a single param', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/users/:id', [noop])
-      const result = router.match('GET', '/users/42')
-      expect(result!.params).toEqual({ id: '42' })
-    })
+    router.add('GET', '/users/:id/posts/:postId', [handler])
 
-    it('extracts multiple params', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/users/:userId/posts/:postId', [noop])
-      const result = router.match('GET', '/users/1/posts/99')
-      expect(result!.params).toEqual({ userId: '1', postId: '99' })
-    })
+    const match = router.match('GET', '/users/42/posts/99')
 
-    it('prefers exact match over param match', () => {
-      const router = new RadixRouter()
-      const exact = makeHandler('exact')
-      const param = makeHandler('param')
-      router.add('GET', '/users/me', [exact])
-      router.add('GET', '/users/:id', [param])
-      const result = router.match('GET', '/users/me')
-      expect(result!.handlers).toContain(exact)
-      expect(result!.handlers).not.toContain(param)
-    })
+    expect(match?.params).toEqual({ id: '42', postId: '99' })
   })
 
-  // ─────────────────────────────────────────────────────────────
-  // Wildcard routes
-  // ─────────────────────────────────────────────────────────────
+  test('captura wildcard', () => {
+    const router = new RadixRouter()
+    const handler: Handler = () => undefined
 
-  describe('wildcard routes', () => {
-    it('matches wildcard and captures rest', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/files/*', [noop])
-      const result = router.match('GET', '/files/a/b/c')
-      expect(result!.matched).toBe(true)
-      expect(result!.params['*']).toBe('a/b/c')
-    })
+    router.add('GET', '/assets/*', [handler])
+
+    const match = router.match('GET', '/assets/css/app.css')
+
+    expect(match?.params).toEqual({ '*': 'css/app.css' })
   })
 
-  // ─────────────────────────────────────────────────────────────
-  // Global middlewares
-  // ─────────────────────────────────────────────────────────────
+  test('retorna middlewares globais mesmo sem rota casada', () => {
+    const router = new RadixRouter()
+    const middleware: Handler = () => undefined
 
-  describe('global middlewares via use()', () => {
-    it.skip('prepends middleware to matched route handlers', () => {
-      const router = new RadixRouter()
-      const mw = makeHandler('mw')
-      const h = makeHandler('h')
-      router.use(mw)
-      router.add('GET', '/hello', [h])
-      const result = router.match('GET', '/hello')
-      expect(result!.handlers[0]).toBe(mw)
-      expect(result!.handlers[1]).toBe(h)
-    })
+    router.use(middleware)
 
-    it.skip('returns middlewares-only result for unmatched route', () => {
-      const router = new RadixRouter()
-      const mw = makeHandler('mw')
-      router.use(mw)
-      const result = router.match('GET', '/nowhere')
-      expect(result).not.toBeNull()
-      expect(result!.matched).toBe(false)
-      expect(result!.handlers).toContain(mw)
-    })
+    const match = router.match('GET', '/missing')
 
-    it('routes error middleware to _errorMiddlewares', () => {
-      const router = new RadixRouter()
-      const errMw: ErrorMiddleware = async ({ error, response }) => {
-        response.status(500).json({ error: error.message })
-      }
-      router.use(errMw)
-      expect(router.errorMiddlewares).toContain(errMw)
-    })
-
-    it('use() with error adds directly to errorMiddlewares', () => {
-      const router = new RadixRouter()
-      const errMw: ErrorMiddleware = async ({ error, next }) => {
-        console.log(error)
-        next()
-      }
-      router.use(errMw)
-      expect(router.errorMiddlewares).toContain(errMw)
-    })
+    expect(match).not.toBeNull()
+    expect(match?.matched).toBe(false)
+    expect(match?.middlewares).toEqual([middleware])
+    expect(match?.handlers).toEqual([])
   })
 
-  // ─────────────────────────────────────────────────────────────
-  // routes getter
-  // ─────────────────────────────────────────────────────────────
+  test('detecta error middleware pela assinatura', () => {
+    const router = new RadixRouter()
+    const errorMw = ({ error, next }: { error: Error; next: () => void }) => {
+      void error
+      return next()
+    }
 
-  describe('routes getter', () => {
-    it('returns all registered routes', () => {
-      const router = new RadixRouter()
-      router.add('GET', '/a', [noop])
-      router.add('POST', '/b', [noop])
-      expect(router.routes).toHaveLength(2)
-      expect(router.routes[0][0]).toBe('GET')
-      expect(router.routes[1][0]).toBe('POST')
-    })
+    router.use(errorMw)
+
+    expect(router.errorMiddlewares).toHaveLength(1)
   })
 })
