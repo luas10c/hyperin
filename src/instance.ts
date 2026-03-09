@@ -39,7 +39,6 @@ export type ErrorContext = HandlerContext & {
 
 export type Handler = (ctx: HandlerContext) => HandlerReturn
 export type ErrorMiddleware = (ctx: ErrorContext) => void | Promise<void>
-export type AnyMiddleware = Handler | ErrorMiddleware
 
 export type HttpMethod =
   | 'GET'
@@ -123,9 +122,9 @@ class Hyperin {
   // Middleware
   // ──────────────────────────────────────────────
 
-  use(handler: AnyMiddleware): this
+  use(handler: Handler | ErrorMiddleware): this
   use(path: string, ...handlers: Handler[]): this
-  use(path: string | AnyMiddleware, ...handlers: Handler[]): this {
+  use(path: string | Handler | ErrorMiddleware, ...handlers: Handler[]): this {
     if (typeof path === 'function') {
       // If it comes without ErrorMiddleware(), try a safe fallback based on rarity type.
       this.#router.use(path as Handler)
@@ -550,29 +549,24 @@ export function hyperin() {
     }
   )
 
-  interface AppUse {
-    (handler: ErrorMiddleware): typeof app
-    (handler: Handler): typeof app
-    (path: string, ...handlers: Handler[]): typeof app
+  function use(path: string, ...handlers: Handler[]): void
+  function use(handler: ErrorMiddleware): void
+  function use(
+    path: string | Handler | ErrorMiddleware,
+    ...handlers: Handler[]
+  ): void {
+    if (typeof path === 'string') {
+      core.use(path, ...handlers)
+      return
+    }
+
+    core.use(path)
   }
 
   // O app é o próprio Server — assim supertest(app) funciona diretamente.
   // Métodos de rota e middleware são adicionados via Object.assign.
   const app = Object.assign(server, {
-    use: ((pathOrHandler: string | AnyMiddleware, ...handlers: Handler[]) => {
-      if (typeof pathOrHandler === 'string') {
-        core.use(pathOrHandler, ...handlers)
-      } else if (
-        typeof pathOrHandler === 'function' &&
-        pathOrHandler.length !== 1
-      ) {
-        core.use(pathOrHandler as ErrorMiddleware)
-        for (const h of handlers) core.use(h)
-      } else {
-        core.use(pathOrHandler as Handler)
-        for (const h of handlers) core.use(h)
-      }
-    }) as AppUse,
+    use,
     mount: (
       prefix: string,
       mounted: Hyperin | { [HYPERIN_CORE]?: Hyperin }
