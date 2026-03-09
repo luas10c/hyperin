@@ -31,9 +31,9 @@ export type FileHandler = (
 
 export interface MultipartOptions {
   /**
-   * Função chamada para cada arquivo recebido.
-   * Recebe a stream do arquivo e metadados.
-   * O valor retornado é disponibilizado em `request.files[fieldname]`.
+   * Function called for each received file.
+   * Receives the file stream and metadata.
+   * The returned value is available in `request.files[fieldname]`.
    *
    * @example Upload para S3
    * ```ts
