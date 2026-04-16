@@ -1,5 +1,6 @@
-/** @type{import('jest').Config} */
-export default {
+import { defineConfig } from 'jest'
+
+export default defineConfig({
   projects: [
     {
       displayName: 'unit',
@@ -25,4 +26,4 @@ export default {
       }
     }
   ]
-}
+})

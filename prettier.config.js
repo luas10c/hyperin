@@ -1,5 +1,5 @@
 /** @type{import('prettier').Config} */
-const config = {
+export default {
   singleQuote: true,
   trailingComma: 'none',
   bracketSpacing: true,
@@ -16,5 +16,3 @@ const config = {
   tabWidth: 2,
   plugins: []
 }
-
-export default config
