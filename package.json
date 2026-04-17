@@ -7,7 +7,7 @@
     "performance",
     "secure"
   ],
-  "version": "0.0.1-beta.1",
+  "version": "0.0.1-beta.2",
   "files": [
     "dist",
     "README.md",
@@ -70,5 +70,8 @@
   "engines": {
     "node": "^20.x || ^22.x || ^24.x"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
 }
