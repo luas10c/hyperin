@@ -1,15 +1,16 @@
 # This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
 
-name: Node.js CI
+name: Publish Package
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types:
+      - released
 
 jobs:
   build:
+    if: github.event.release.target_commitish == 'main'
     runs-on: ubuntu-latest
 
     steps:
