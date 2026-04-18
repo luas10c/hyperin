@@ -72,15 +72,54 @@ type RouteMiddleware<TRequest extends Request> = TypedMiddleware<
   RequestRefinement
 >
 
+type RouteStep1<TPath extends string> = RouteMiddleware<RouteRequest<TPath>>
+type RouteStep2<
+  TPath extends string,
+  T1 extends RouteStep1<TPath>
+> = RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>
+type RouteStep3<
+  TPath extends string,
+  T1 extends RouteStep1<TPath>,
+  T2 extends RouteStep2<TPath, T1>
+> = RouteMiddleware<
+  ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
+>
+type RouteStep4<
+  TPath extends string,
+  T1 extends RouteStep1<TPath>,
+  T2 extends RouteStep2<TPath, T1>,
+  T3 extends RouteStep3<TPath, T1, T2>
+> = RouteMiddleware<
+  ApplyMiddleware<
+    ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
+    T3
+  >
+>
+type RouteStep5<
+  TPath extends string,
+  T1 extends RouteStep1<TPath>,
+  T2 extends RouteStep2<TPath, T1>,
+  T3 extends RouteStep3<TPath, T1, T2>,
+  T4 extends RouteStep4<TPath, T1, T2, T3>
+> = RouteMiddleware<
+  ApplyMiddleware<
+    ApplyMiddleware<
+      ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
+      T3
+    >,
+    T4
+  >
+>
+
 interface RouteMethod<TSelf> {
-  <const TPath extends string, T1 extends RouteMiddleware<RouteRequest<TPath>>>(
+  <const TPath extends string, T1 extends RouteStep1<TPath>>(
     path: TPath,
     h1: T1
   ): TSelf
   <
     const TPath extends string,
-    T1 extends RouteMiddleware<RouteRequest<TPath>>,
-    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>
+    T1 extends RouteStep1<TPath>,
+    T2 extends RouteStep2<TPath, T1>
   >(
     path: TPath,
     h1: T1,
@@ -88,11 +127,9 @@ interface RouteMethod<TSelf> {
   ): TSelf
   <
     const TPath extends string,
-    T1 extends RouteMiddleware<RouteRequest<TPath>>,
-    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
-    >
+    T1 extends RouteStep1<TPath>,
+    T2 extends RouteStep2<TPath, T1>,
+    T3 extends RouteStep3<TPath, T1, T2>
   >(
     path: TPath,
     h1: T1,
@@ -101,17 +138,10 @@ interface RouteMethod<TSelf> {
   ): TSelf
   <
     const TPath extends string,
-    T1 extends RouteMiddleware<RouteRequest<TPath>>,
-    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
-    >,
-    T4 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
-        T3
-      >
-    >
+    T1 extends RouteStep1<TPath>,
+    T2 extends RouteStep2<TPath, T1>,
+    T3 extends RouteStep3<TPath, T1, T2>,
+    T4 extends RouteStep4<TPath, T1, T2, T3>
   >(
     path: TPath,
     h1: T1,
@@ -121,26 +151,11 @@ interface RouteMethod<TSelf> {
   ): TSelf
   <
     const TPath extends string,
-    T1 extends RouteMiddleware<RouteRequest<TPath>>,
-    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
-    >,
-    T4 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
-        T3
-      >
-    >,
-    T5 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
-          T3
-        >,
-        T4
-      >
-    >
+    T1 extends RouteStep1<TPath>,
+    T2 extends RouteStep2<TPath, T1>,
+    T3 extends RouteStep3<TPath, T1, T2>,
+    T4 extends RouteStep4<TPath, T1, T2, T3>,
+    T5 extends RouteStep5<TPath, T1, T2, T3, T4>
   >(
     path: TPath,
     h1: T1,
