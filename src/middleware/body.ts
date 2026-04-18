@@ -3,10 +3,10 @@ import {
   getContentEncoding,
   readDecodedBody,
   parseLimit
-} from './util'
+} from '../util'
 
-import type { Request } from './request'
-import type { Response } from './response'
+import type { Request } from '../request'
+import type { Response } from '../response'
 
 type NextFunction = () => void | Promise<void>
 

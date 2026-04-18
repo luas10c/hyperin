@@ -1,9 +1,9 @@
 import type { Readable } from 'node:stream'
 
-import { parseMultipart } from './util'
+import { parseMultipart } from '../util'
 
-import type { Request } from './request'
-import type { Response } from './response'
+import type { Request } from '../request'
+import type { Response } from '../response'
 
 type NextFunction = () => void | Promise<void>
 

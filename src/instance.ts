@@ -5,40 +5,21 @@ import {
   ServerResponse
 } from 'node:http'
 import type { Socket } from 'node:net'
+import type { ParsedUrlQuery } from 'node:querystring'
 
 import { Request } from './request'
 import { Response } from './response'
 import { RadixRouter } from './router'
+import type {
+  ApplyMiddleware,
+  ErrorMiddleware,
+  Handler,
+  RequestRefinement,
+  RouteRequest,
+  TypedMiddleware
+} from './types'
 
 const HYPERIN_CORE = Symbol.for('hyperin.core')
-
-// ─────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────
-
-type NextFunction = () => void | Promise<void>
-
-export type HandlerReturn =
-  | void
-  | undefined
-  | string
-  | unknown[]
-  | Record<string, unknown>
-  | Promise<void | undefined | string | unknown[] | Record<string, unknown>>
-
-export type HandlerContext = {
-  request: Request
-  response: Response
-  next: NextFunction
-}
-
-export type ErrorContext = HandlerContext & {
-  error: Error
-  next: NextFunction
-}
-
-export type Handler = (ctx: HandlerContext) => HandlerReturn
-export type ErrorMiddleware = (ctx: ErrorContext) => void | Promise<void>
 
 export type HttpMethod =
   | 'GET'
@@ -79,16 +60,211 @@ export interface ShutdownOptions {
 // ─────────────────────────────────────────────────────────────
 
 interface RouteChain {
-  get(handler: Handler): RouteChain
   get(...handlers: Handler[]): RouteChain
-  post(handler: Handler): RouteChain
   post(...handlers: Handler[]): RouteChain
-  put(handler: Handler): RouteChain
   put(...handlers: Handler[]): RouteChain
-  patch(handler: Handler): RouteChain
   patch(...handlers: Handler[]): RouteChain
-  delete(handler: Handler): RouteChain
   delete(...handlers: Handler[]): RouteChain
+}
+
+type RouteMiddleware<TRequest extends Request> = TypedMiddleware<
+  TRequest,
+  RequestRefinement
+>
+
+interface RouteMethod<TSelf> {
+  <const TPath extends string, T1 extends RouteMiddleware<RouteRequest<TPath>>>(
+    path: TPath,
+    h1: T1
+  ): TSelf
+  <
+    const TPath extends string,
+    T1 extends RouteMiddleware<RouteRequest<TPath>>,
+    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2
+  ): TSelf
+  <
+    const TPath extends string,
+    T1 extends RouteMiddleware<RouteRequest<TPath>>,
+    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
+    >
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2,
+    h3: T3
+  ): TSelf
+  <
+    const TPath extends string,
+    T1 extends RouteMiddleware<RouteRequest<TPath>>,
+    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
+    >,
+    T4 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
+        T3
+      >
+    >
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2,
+    h3: T3,
+    h4: T4
+  ): TSelf
+  <
+    const TPath extends string,
+    T1 extends RouteMiddleware<RouteRequest<TPath>>,
+    T2 extends RouteMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>>,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
+    >,
+    T4 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
+        T3
+      >
+    >,
+    T5 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>,
+          T3
+        >,
+        T4
+      >
+    >
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2,
+    h3: T3,
+    h4: T4,
+    h5: T5
+  ): TSelf
+}
+
+type HyperinApp = Server<typeof Request, typeof Response> & {
+  use: {
+    (path: string, ...handlers: Handler[]): void
+    (handler: ErrorMiddleware): void
+  }
+  mount: (
+    prefix: string,
+    mounted: Hyperin | HyperinApp | { [HYPERIN_CORE]?: Hyperin }
+  ) => HyperinApp
+  get: RouteMethod<HyperinApp>
+  post: RouteMethod<HyperinApp>
+  put: RouteMethod<HyperinApp>
+  patch: RouteMethod<HyperinApp>
+  delete: RouteMethod<HyperinApp>
+  head: RouteMethod<HyperinApp>
+  options: RouteMethod<HyperinApp>
+  all: RouteMethod<HyperinApp>
+  route: Hyperin['route']
+  shutdown: Hyperin['shutdown']
+  graceful: Hyperin['graceful']
+  handler: Hyperin['handler']
+}
+
+function decodeQueryComponent(value: string): string {
+  const normalized = value.includes('+') ? value.replace(/\+/g, ' ') : value
+
+  try {
+    return decodeURIComponent(normalized)
+  } catch {
+    return normalized
+  }
+}
+
+function parseQueryString(query: string): ParsedUrlQuery {
+  const parsed: ParsedUrlQuery = {}
+  let index = 0
+
+  while (index < query.length) {
+    let separator = query.indexOf('&', index)
+    if (separator === -1) separator = query.length
+
+    if (separator > index) {
+      const entry = query.slice(index, separator)
+      const equals = entry.indexOf('=')
+      const rawKey = equals === -1 ? entry : entry.slice(0, equals)
+
+      if (rawKey) {
+        const key = decodeQueryComponent(rawKey)
+        const value =
+          equals === -1 ? '' : decodeQueryComponent(entry.slice(equals + 1))
+        parsed[key] = value
+      }
+    }
+
+    index = separator + 1
+  }
+
+  return parsed
+}
+
+function parseRequestTarget(rawUrl: string): {
+  path: string
+  query: ParsedUrlQuery
+} {
+  if (!rawUrl) {
+    return { path: '/', query: {} }
+  }
+
+  let pathStart = 0
+
+  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    const authorityStart = rawUrl.indexOf('//')
+    const firstSlash = rawUrl.indexOf('/', authorityStart + 2)
+
+    if (firstSlash === -1) {
+      return { path: '/', query: {} }
+    }
+
+    pathStart = firstSlash
+  }
+
+  let pathEnd = rawUrl.length
+  const queryStart = rawUrl.indexOf('?', pathStart)
+  if (queryStart !== -1 && queryStart < pathEnd) pathEnd = queryStart
+
+  const hashStart = rawUrl.indexOf('#', pathStart)
+  if (hashStart !== -1 && hashStart < pathEnd) pathEnd = hashStart
+
+  const rawPath = rawUrl.slice(pathStart, pathEnd)
+  const path = rawPath
+    ? rawPath.charCodeAt(0) === 47
+      ? rawPath
+      : `/${rawPath}`
+    : '/'
+
+  if (queryStart === -1) {
+    return { path, query: {} }
+  }
+
+  const queryEnd =
+    hashStart !== -1 && hashStart > queryStart ? hashStart : rawUrl.length
+
+  return {
+    path,
+    query: parseQueryString(rawUrl.slice(queryStart + 1, queryEnd))
+  }
+}
+
+function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { then?: unknown }).then === 'function'
+  )
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -205,27 +381,27 @@ class Hyperin {
 
   route(path: string): RouteChain {
     const chain: RouteChain = {
-      get: (...h: Handler[]) => {
-        this.get(path, ...h)
+      get: (...handlers: Handler[]) => {
+        this.#addRoute('GET', path, handlers)
 
         return chain
       },
 
-      post: (...h: Handler[]) => {
-        this.post(path, ...h)
+      post: (...handlers: Handler[]) => {
+        this.#addRoute('POST', path, handlers)
 
         return chain
       },
-      put: (...h: Handler[]) => {
-        this.put(path, ...h)
+      put: (...handlers: Handler[]) => {
+        this.#addRoute('PUT', path, handlers)
         return chain
       },
-      patch: (...h: Handler[]) => {
-        this.patch(path, ...h)
+      patch: (...handlers: Handler[]) => {
+        this.#addRoute('PATCH', path, handlers)
         return chain
       },
-      delete: (...h: Handler[]) => {
-        this.delete(path, ...h)
+      delete: (...handlers: Handler[]) => {
+        this.#addRoute('DELETE', path, handlers)
         return chain
       }
     }
@@ -285,16 +461,10 @@ class Hyperin {
     const request = rawRequest as Request
     const response = rawResponse as Response
 
-    // It builds the URL only once and reuses it for query and path.
-    const rawUrl = request.url || ''
-    const parsedUrl =
-      rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
-        ? new URL(rawUrl)
-        : new URL(rawUrl, `http://${request.headers?.host || 'localhost'}`)
+    const rawUrl = request.url || '/'
+    const { path, query } = parseRequestTarget(rawUrl)
+    request.query = query
 
-    request.query = Object.fromEntries(parsedUrl.searchParams)
-
-    const path = request.parsedUrl.pathname || '/'
     const method = request.method || 'GET'
     const match = this.#router.match(method, path)
 
@@ -323,7 +493,24 @@ class Hyperin {
 
       const handler = idx < mLen ? middlewares[idx++] : handlers[idx++ - mLen]
       try {
-        const result = await handler({ request, response, next })
+        const result = handler({ request, response, next })
+
+        if (isPromiseLike(result)) {
+          return void (await result
+            .then((resolved) => {
+              if (resolved !== undefined && !response.sent) {
+                if (typeof resolved === 'string') {
+                  response.text(resolved)
+                } else {
+                  response.json(resolved as object)
+                }
+              }
+            })
+            .catch(async (err: unknown) => {
+              await this.#runErrorMiddlewares(err as Error, request, response)
+            }))
+        }
+
         if (result !== undefined && !response.sent) {
           if (typeof result === 'string') {
             response.text(result)
@@ -360,7 +547,11 @@ class Hyperin {
 
     const next = async (): Promise<void> => {
       if (i >= handlers.length) return
-      await handlers[i++]({ error: err, request, response, next })
+
+      const result = handlers[i++]({ error: err, request, response, next })
+      if (isPromiseLike(result)) {
+        await result
+      }
     }
 
     await next()
@@ -535,7 +726,7 @@ class Hyperin {
   }
 }
 
-export function hyperin() {
+export function hyperin(): HyperinApp {
   const core = new Hyperin()
 
   // Cria o http.Server imediatamente com as classes customizadas.
@@ -575,38 +766,38 @@ export function hyperin() {
       return app
     },
     [HYPERIN_CORE]: core,
-    get: (path: string, ...h: Handler[]) => {
-      core.get(path, ...h)
+    get: ((path: string, ...handlers: Handler[]) => {
+      ;(core.get as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
-    post: (path: string, ...h: Handler[]) => {
-      core.post(path, ...h)
+    }) as unknown as RouteMethod<HyperinApp>,
+    post: ((path: string, ...handlers: Handler[]) => {
+      ;(core.post as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
-    put: (path: string, ...h: Handler[]) => {
-      core.put(path, ...h)
+    }) as unknown as RouteMethod<HyperinApp>,
+    put: ((path: string, ...handlers: Handler[]) => {
+      ;(core.put as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
-    patch: (path: string, ...h: Handler[]) => {
-      core.patch(path, ...h)
+    }) as unknown as RouteMethod<HyperinApp>,
+    patch: ((path: string, ...handlers: Handler[]) => {
+      ;(core.patch as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
-    delete: (path: string, ...h: Handler[]) => {
-      core.delete(path, ...h)
+    }) as unknown as RouteMethod<HyperinApp>,
+    delete: ((path: string, ...handlers: Handler[]) => {
+      ;(core.delete as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
-    head: (path: string, ...h: Handler[]) => {
-      core.head(path, ...h)
+    }) as unknown as RouteMethod<HyperinApp>,
+    head: ((path: string, ...handlers: Handler[]) => {
+      ;(core.head as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
-    options: (path: string, ...h: Handler[]) => {
-      core.options(path, ...h)
+    }) as unknown as RouteMethod<HyperinApp>,
+    options: ((path: string, ...handlers: Handler[]) => {
+      ;(core.options as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
-    all: (path: string, ...h: Handler[]) => {
-      core.all(path, ...h)
+    }) as unknown as RouteMethod<HyperinApp>,
+    all: ((path: string, ...handlers: Handler[]) => {
+      ;(core.all as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    },
+    }) as unknown as RouteMethod<HyperinApp>,
     route: core.route.bind(core),
     shutdown: core.shutdown.bind(core),
     graceful: core.graceful.bind(core),
@@ -633,7 +824,7 @@ export function hyperin() {
     }
   })
 
-  return app
+  return app as HyperinApp
 }
 
 export default hyperin

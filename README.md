@@ -35,9 +35,15 @@ app.get('/users', async () => ({ users: [] }))
 app.post('/users', async ({ request }) => ({ created: request.body }))
 app.put('/users/:id', async ({ request }) => ({ updated: request.params.id }))
 app.patch('/users/:id', async ({ request }) => ({ patched: request.params.id }))
-app.delete('/users/:id', async ({ request }) => ({ deleted: request.params.id }))
-app.head('/users', async ({ response }) => { response.status(200).send() })
-app.options('/users', async ({ response }) => { response.status(204).send() })
+app.delete('/users/:id', async ({ request }) => ({
+  deleted: request.params.id
+}))
+app.head('/users', async ({ response }) => {
+  response.status(200).send()
+})
+app.options('/users', async ({ response }) => {
+  response.status(204).send()
+})
 app.all('/ping', async () => ({ pong: true }))
 ```
 
@@ -123,18 +129,18 @@ app.get('/protected', auth, async ({ request }) => ({
 
 ## Request
 
-| Property | Type | Description |
-|---|---|---|
-| `request.params` | `Record<string, string>` | Route params (`:id`, `*`) |
-| `request.query` | `ParsedUrlQuery` | Parsed query string |
-| `request.body` | `object \| string \| undefined` | Parsed body (requires middleware) |
-| `request.files` | `Record<string, UploadedFile>` | Uploaded files (requires `multipart`) |
-| `request.locals` | `Record<string, unknown>` | State bag for passing data between handlers |
-| `request.ipAddress` | `string` | Client IP (respects `X-Forwarded-For`) |
+| Property            | Type                            | Description                                 |
+| ------------------- | ------------------------------- | ------------------------------------------- |
+| `request.params`    | `Record<string, string>`        | Route params (`:id`, `*`)                   |
+| `request.query`     | `ParsedUrlQuery`                | Parsed query string                         |
+| `request.body`      | `object \| string \| undefined` | Parsed body (requires middleware)           |
+| `request.files`     | `Record<string, UploadedFile>`  | Uploaded files (requires `multipart`)       |
+| `request.locals`    | `Record<string, unknown>`       | State bag for passing data between handlers |
+| `request.ipAddress` | `string`                        | Client IP (respects `X-Forwarded-For`)      |
 
 ```typescript
-request.get('authorization')      // get a header value
-request.is('application/json')    // check content-type
+request.get('authorization') // get a header value
+request.is('application/json') // check content-type
 ```
 
 ---
@@ -147,8 +153,8 @@ All methods are chainable.
 response.status(201).json({ created: true })
 response.status(200).text('Hello')
 response.status(200).html('<h1>Hello</h1>')
-response.send({ auto: 'detect' })   // json, text, or Buffer
-response.redirect('/new-path')      // 302 by default
+response.send({ auto: 'detect' }) // json, text, or Buffer
+response.redirect('/new-path') // 302 by default
 response.redirect('/moved', 301)
 response.header('X-Custom', 'value')
 response.type('application/xml')
@@ -160,18 +166,18 @@ response.cookie('token', 'abc', {
 })
 ```
 
-| Method | Description |
-|---|---|
-| `response.json(obj)` | Send JSON with `Content-Type: application/json` |
-| `response.text(str)` | Send plain text |
-| `response.html(str)` | Send HTML |
-| `response.send(body?)` | Auto-detect: object→JSON, string→text, Buffer→binary |
-| `response.status(code)` | Set status code (chainable) |
-| `response.header(key, val)` | Set a response header (chainable) |
-| `response.redirect(url, code?)` | Redirect (default 302) |
-| `response.cookie(name, val, opts?)` | Set a cookie |
-| `response.type(mime)` | Set Content-Type |
-| `response.sent` | `boolean` — whether the response was already sent |
+| Method                              | Description                                          |
+| ----------------------------------- | ---------------------------------------------------- |
+| `response.json(obj)`                | Send JSON with `Content-Type: application/json`      |
+| `response.text(str)`                | Send plain text                                      |
+| `response.html(str)`                | Send HTML                                            |
+| `response.send(body?)`              | Auto-detect: object→JSON, string→text, Buffer→binary |
+| `response.status(code)`             | Set status code (chainable)                          |
+| `response.header(key, val)`         | Set a response header (chainable)                    |
+| `response.redirect(url, code?)`     | Redirect (default 302)                               |
+| `response.cookie(name, val, opts?)` | Set a cookie                                         |
+| `response.type(mime)`               | Set Content-Type                                     |
+| `response.sent`                     | `boolean` — whether the response was already sent    |
 
 ---
 
@@ -207,55 +213,64 @@ app.use(async ({ error, response }) => {
 
 ## Built-in Middlewares
 
-### CORS — `hyperin.cors(options?)`
+### CORS — `cors(options?)`
 
 ```typescript
 import hyperin from 'hyperin'
+import {
+  cors,
+  json,
+  multipart,
+  serveStatic,
+  urlencoded
+} from 'hyperin/middleware'
 
 // Allow all origins
-app.use(hyperin.cors())
+app.use(cors())
 
 // Fixed origin
-app.use(hyperin.cors({ origin: 'https://myapp.com' }))
+app.use(cors({ origin: 'https://myapp.com' }))
 
 // Array of origins
-app.use(hyperin.cors({ origin: ['https://a.com', 'https://b.com'] }))
+app.use(cors({ origin: ['https://a.com', 'https://b.com'] }))
 
 // RegExp
-app.use(hyperin.cors({ origin: /\.myapp\.com$/ }))
+app.use(cors({ origin: /\.myapp\.com$/ }))
 
 // Reflect request origin (required with credentials)
-app.use(hyperin.cors({ origin: true, credentials: true }))
+app.use(cors({ origin: true, credentials: true }))
 
 // Disable CORS headers entirely
-app.use(hyperin.cors({ origin: false }))
+app.use(cors({ origin: false }))
 
 // Async callback
-app.use(hyperin.cors({
-  origin: (origin, cb) => {
-    const allowed = checkDatabase(origin)
-    cb(null, allowed)
-  }
-}))
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      const allowed = checkDatabase(origin)
+      cb(null, allowed)
+    }
+  })
+)
 ```
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `origin` | `string \| string[] \| RegExp \| boolean \| function` | `'*'` | Allowed origins |
-| `methods` | `string \| string[]` | `'GET,HEAD,PUT,PATCH,POST,DELETE'` | Allowed methods |
-| `allowedHeaders` | `string \| string[]` | reflects request | Allowed headers |
-| `exposedHeaders` | `string \| string[]` | `''` | Headers exposed to the browser |
-| `credentials` | `boolean` | `false` | Set `Access-Control-Allow-Credentials` |
-| `maxAge` | `number` | `0` | Preflight cache duration in seconds |
-| `preflightContinue` | `boolean` | `false` | Pass OPTIONS to next handler |
-| `optionsSuccessStatus` | `number` | `204` | Status for successful preflight |
+| Option                 | Type                                                  | Default                            | Description                            |
+| ---------------------- | ----------------------------------------------------- | ---------------------------------- | -------------------------------------- |
+| `origin`               | `string \| string[] \| RegExp \| boolean \| function` | `'*'`                              | Allowed origins                        |
+| `methods`              | `string \| string[]`                                  | `'GET,HEAD,PUT,PATCH,POST,DELETE'` | Allowed methods                        |
+| `allowedHeaders`       | `string \| string[]`                                  | reflects request                   | Allowed headers                        |
+| `exposedHeaders`       | `string \| string[]`                                  | `''`                               | Headers exposed to the browser         |
+| `credentials`          | `boolean`                                             | `false`                            | Set `Access-Control-Allow-Credentials` |
+| `maxAge`               | `number`                                              | `0`                                | Preflight cache duration in seconds    |
+| `preflightContinue`    | `boolean`                                             | `false`                            | Pass OPTIONS to next handler           |
+| `optionsSuccessStatus` | `number`                                              | `204`                              | Status for successful preflight        |
 
 ---
 
-### JSON body parser — `hyperin.json(options?)`
+### JSON body parser — `json(options?)`
 
 ```typescript
-app.use(hyperin.json())
+app.use(json())
 
 app.post('/data', async ({ request }) => {
   console.log(request.body) // parsed object
@@ -263,22 +278,22 @@ app.post('/data', async ({ request }) => {
 })
 ```
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `limit` | `string \| number` | `'100kb'` | Max body size. Supports `'500b'`, `'100kb'`, `'1mb'`, `'1gb'` |
-| `strict` | `boolean` | `true` | Only accept objects and arrays at the top level |
-| `inflate` | `boolean` | `true` | Decompress gzip/deflate/br bodies |
-| `defaultCharset` | `'utf-8' \| 'latin1'` | `'utf-8'` | Charset fallback |
-| `reviver` | `function` | — | `JSON.parse` reviver function |
-| `verify` | `function` | — | `(req, res, buf, encoding) => void` — inspect raw buffer before parsing |
-| `type` | `string \| string[] \| function` | `'application/json'` | Content-Type matcher |
+| Option           | Type                             | Default              | Description                                                             |
+| ---------------- | -------------------------------- | -------------------- | ----------------------------------------------------------------------- |
+| `limit`          | `string \| number`               | `'100kb'`            | Max body size. Supports `'500b'`, `'100kb'`, `'1mb'`, `'1gb'`           |
+| `strict`         | `boolean`                        | `true`               | Only accept objects and arrays at the top level                         |
+| `inflate`        | `boolean`                        | `true`               | Decompress gzip/deflate/br bodies                                       |
+| `defaultCharset` | `'utf-8' \| 'latin1'`            | `'utf-8'`            | Charset fallback                                                        |
+| `reviver`        | `function`                       | —                    | `JSON.parse` reviver function                                           |
+| `verify`         | `function`                       | —                    | `(req, res, buf, encoding) => void` — inspect raw buffer before parsing |
+| `type`           | `string \| string[] \| function` | `'application/json'` | Content-Type matcher                                                    |
 
 ---
 
-### URL-encoded body parser — `hyperin.urlencoded(options?)`
+### URL-encoded body parser — `urlencoded(options?)`
 
 ```typescript
-app.use(hyperin.urlencoded({ extended: true }))
+app.use(urlencoded({ extended: true }))
 
 app.post('/form', async ({ request }) => {
   console.log(request.body) // { name: 'Alice', tags: ['a', 'b'] }
@@ -286,16 +301,16 @@ app.post('/form', async ({ request }) => {
 })
 ```
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `extended` | `boolean` | `false` | `true` enables nested objects and arrays (`user[name]=Alice`) |
-| `limit` | `string \| number` | `'100kb'` | Max body size |
-| `parameterLimit` | `number` | `1000` | Max number of parameters |
-| `depth` | `number` | `32` | Max nesting depth (extended mode) |
-| `inflate` | `boolean` | `true` | Decompress gzip/deflate/br |
-| `defaultCharset` | `'utf-8' \| 'latin1'` | `'utf-8'` | Charset fallback |
-| `verify` | `function` | — | `(req, res, buf, encoding) => void` |
-| `type` | `string \| string[] \| function` | `'application/x-www-form-urlencoded'` | Content-Type matcher |
+| Option           | Type                             | Default                               | Description                                                   |
+| ---------------- | -------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| `extended`       | `boolean`                        | `false`                               | `true` enables nested objects and arrays (`user[name]=Alice`) |
+| `limit`          | `string \| number`               | `'100kb'`                             | Max body size                                                 |
+| `parameterLimit` | `number`                         | `1000`                                | Max number of parameters                                      |
+| `depth`          | `number`                         | `32`                                  | Max nesting depth (extended mode)                             |
+| `inflate`        | `boolean`                        | `true`                                | Decompress gzip/deflate/br                                    |
+| `defaultCharset` | `'utf-8' \| 'latin1'`            | `'utf-8'`                             | Charset fallback                                              |
+| `verify`         | `function`                       | —                                     | `(req, res, buf, encoding) => void`                           |
+| `type`           | `string \| string[] \| function` | `'application/x-www-form-urlencoded'` | Content-Type matcher                                          |
 
 Extended mode examples:
 
@@ -308,22 +323,24 @@ email=user%40example.com       →  { email: 'user@example.com' }
 
 ---
 
-### Multipart / file uploads — `hyperin.multipart(options?)`
+### Multipart / file uploads — `multipart(options?)`
 
 ```typescript
 import { join } from 'node:path'
 
-app.use(hyperin.multipart({
-  dest: join(import.meta.dirname, 'uploads'),
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5mb
-    files: 5,
-    fields: 20
-  }
-}))
+app.use(
+  multipart({
+    dest: join(import.meta.dirname, 'uploads'),
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5mb
+      files: 5,
+      fields: 20
+    }
+  })
+)
 
 app.post('/upload', async ({ request }) => {
-  console.log(request.body)  // text fields
+  console.log(request.body) // text fields
   console.log(request.files) // uploaded files
   return { uploaded: true }
 })
@@ -333,38 +350,38 @@ Each entry in `request.files` is an `UploadedFile`:
 
 ```typescript
 interface UploadedFile {
-  fieldname: string  // form field name
-  filename:  string  // original filename
-  encoding:  string  // e.g. '7bit'
-  mimetype:  string  // e.g. 'image/png'
-  size:      number  // bytes
-  path:      string  // absolute path on disk
+  fieldname: string // form field name
+  filename: string // original filename
+  encoding: string // e.g. '7bit'
+  mimetype: string // e.g. 'image/png'
+  size: number // bytes
+  path: string // absolute path on disk
 }
 ```
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `dest` | `string` | `'./uploads'` | Directory to save uploaded files |
-| `limits.fileSize` | `number` | — | Max file size in bytes |
-| `limits.files` | `number` | — | Max number of files |
-| `limits.fields` | `number` | — | Max number of text fields |
+| Option            | Type     | Default       | Description                      |
+| ----------------- | -------- | ------------- | -------------------------------- |
+| `dest`            | `string` | `'./uploads'` | Directory to save uploaded files |
+| `limits.fileSize` | `number` | —             | Max file size in bytes           |
+| `limits.files`    | `number` | —             | Max number of files              |
+| `limits.fields`   | `number` | —             | Max number of text fields        |
 
 ---
 
-### Static files — `hyperin.static(directory, options?)`
+### Static files — `serveStatic(directory, options?)`
 
 ```typescript
 import { join } from 'node:path'
 
-app.use('/public', hyperin.static(join(import.meta.dirname, 'public')))
+app.use('/public', serveStatic(join(import.meta.dirname, 'public')))
 ```
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `index` | `boolean \| string` | `true` | Serve `index.html` for directory requests |
-| `maxAge` | `number` | `0` | `Cache-Control: max-age` in seconds |
-| `etag` | `boolean` | `true` | Enable ETag header |
-| `dotfiles` | `'allow' \| 'deny' \| 'ignore'` | `'ignore'` | Handling of dotfiles |
+| Option     | Type                            | Default    | Description                               |
+| ---------- | ------------------------------- | ---------- | ----------------------------------------- |
+| `index`    | `boolean \| string`             | `true`     | Serve `index.html` for directory requests |
+| `maxAge`   | `number`                        | `0`        | `Cache-Control: max-age` in seconds       |
+| `etag`     | `boolean`                       | `true`     | Enable ETag header                        |
+| `dotfiles` | `'allow' \| 'deny' \| 'ignore'` | `'ignore'` | Handling of dotfiles                      |
 
 ---
 
@@ -388,17 +405,26 @@ app.mount('/users', users)
 ```typescript
 import hyperin from 'hyperin'
 import { join } from 'node:path'
+import {
+  cors,
+  json,
+  multipart,
+  serveStatic,
+  urlencoded
+} from 'hyperin/middleware'
 
 const app = hyperin()
 
 // ── Middlewares ──────────────────────────────────────────────
-app.use(hyperin.cors({ origin: '*' }))
-app.use(hyperin.json())
-app.use(hyperin.urlencoded({ extended: true }))
-app.use(hyperin.multipart({
-  dest: join(import.meta.dirname, 'uploads'),
-  limits: { fileSize: 5 * 1024 * 1024 }
-}))
+app.use(cors({ origin: '*' }))
+app.use(json())
+app.use(urlencoded({ extended: true }))
+app.use(
+  multipart({
+    dest: join(import.meta.dirname, 'uploads'),
+    limits: { fileSize: 5 * 1024 * 1024 }
+  })
+)
 
 // ── Logger ───────────────────────────────────────────────────
 app.use(async ({ request, next }) => {
@@ -431,7 +457,7 @@ app.post('/upload', async ({ request }) => ({
   files: request.files
 }))
 
-app.use('/static', hyperin.static(join(import.meta.dirname, 'public')))
+app.use('/static', serveStatic(join(import.meta.dirname, 'public')))
 
 // ── Server ───────────────────────────────────────────────────
 app.listen(3000, '0.0.0.0', () => {
@@ -452,7 +478,7 @@ import type {
   HandlerReturn,
   Request,
   Response,
-  HttpMethod,
+  HttpMethod
 } from 'hyperin'
 ```
 

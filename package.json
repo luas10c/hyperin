@@ -20,6 +20,11 @@
       "default": "./dist/index.js",
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./middleware": {
+      "default": "./dist/middleware/index.js",
+      "import": "./dist/middleware/index.js",
+      "types": "./dist/middleware/index.d.ts"
     }
   },
   "type": "module",

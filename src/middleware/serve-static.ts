@@ -1,10 +1,10 @@
 import { stat } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
-import { pipeFile } from './util'
+import { pipeFile } from '../util'
 import type { Stats } from 'node:fs'
 
-import type { Request } from './request'
-import type { Response } from './response'
+import type { Request } from '../request'
+import type { Response } from '../response'
 
 type NextFunction = () => void | Promise<void>
 

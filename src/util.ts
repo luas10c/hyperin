@@ -13,7 +13,7 @@ import { extname } from 'node:path'
 import type { Request } from './request'
 import type { Response } from './response'
 
-import type { FileHandler, FileInfo } from './multipart'
+import type { FileHandler, FileInfo } from './middleware/multipart'
 
 type ParseLimits = {
   fileSize?: number

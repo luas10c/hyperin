@@ -1,29 +1,6 @@
-import type { Request } from './request'
-import type { Response } from './response'
+import type { ErrorMiddleware, Handler } from './types'
 
-type NextFunction = () => void | Promise<void>
-
-export type HandlerReturn =
-  | void
-  | undefined
-  | string
-  | unknown[]
-  | Record<string, unknown>
-  | Promise<void | undefined | string | unknown[] | Record<string, unknown>>
-
-export type HandlerContext = {
-  request: Request
-  response: Response
-  next: NextFunction
-}
-
-export type ErrorContext = HandlerContext & {
-  error: Error
-  next: NextFunction
-}
-
-export type Handler = (ctx: HandlerContext) => HandlerReturn
-export type ErrorMiddleware = (ctx: ErrorContext) => void | Promise<void>
+export type { ErrorMiddleware, Handler } from './types'
 
 export type HttpMethod =
   | 'GET'
@@ -60,6 +37,24 @@ export interface MatchResult {
   middlewares: Handler[]
   params: Record<string, string>
   matched: boolean
+}
+
+function forEachPathSegment(
+  path: string,
+  callback: (segment: string) => void
+): void {
+  let index = 0
+
+  while (index < path.length) {
+    while (index < path.length && path.charCodeAt(index) === 47) index++
+    if (index >= path.length) return
+
+    let end = index + 1
+    while (end < path.length && path.charCodeAt(end) !== 47) end++
+
+    callback(path.slice(index, end))
+    index = end + 1
+  }
 }
 
 /** Cache para não re-executar toString + regex na mesma função */
@@ -121,10 +116,9 @@ export class RadixRouter {
 
   add(method: HttpMethod, path: string, handlers: Handler[]): void {
     this._routes.push([method, path, handlers])
-    const segments = path.split('/').filter(Boolean)
     let node = this.root
 
-    for (const segment of segments) {
+    forEachPathSegment(path, (segment) => {
       if (segment.startsWith(':')) {
         if (!node.paramChild) {
           node.paramChild = createNode()
@@ -142,7 +136,7 @@ export class RadixRouter {
         }
         node = node.children.get(segment)!
       }
-    }
+    })
 
     node.isEnd = true
     node.handlers.set(method, handlers)
@@ -150,12 +144,7 @@ export class RadixRouter {
 
   match(method: string, path: string): MatchResult | null {
     const params: Record<string, string> = {}
-    const node = this.#traverse(
-      this.root,
-      path.split('/').filter(Boolean),
-      0,
-      params
-    )
+    const node = this.#traverse(this.root, path, 0, params)
 
     const routeHandlers = node?.isEnd
       ? node.handlers.get(method as HttpMethod) || node.handlers.get('ALL')
@@ -182,19 +171,25 @@ export class RadixRouter {
 
   #traverse(
     node: TrieNode,
-    segments: string[],
+    path: string,
     index: number,
     params: Record<string, string>
   ): TrieNode | null {
-    if (index === segments.length) return node
+    let start = index
+    while (start < path.length && path.charCodeAt(start) === 47) start++
+    if (start >= path.length) return node
 
-    const segment = segments[index]
+    let end = start + 1
+    while (end < path.length && path.charCodeAt(end) !== 47) end++
+
+    const nextIndex = end
+    const segment = path.slice(start, end)
 
     // 1. Exact match (fastest path)
     const exactChild = node.children.get(segment)
 
     if (exactChild) {
-      const result = this.#traverse(exactChild, segments, index + 1, params)
+      const result = this.#traverse(exactChild, path, nextIndex, params)
       if (result) return result
     }
 
@@ -204,12 +199,7 @@ export class RadixRouter {
       const hadKey = paramName in params
       const prevValue = params[paramName]
       params[paramName] = segment
-      const result = this.#traverse(
-        node.paramChild,
-        segments,
-        index + 1,
-        params
-      )
+      const result = this.#traverse(node.paramChild, path, nextIndex, params)
       if (result) return result
       // Restore params on backtrack — without allocating an object
       if (hadKey) {
@@ -221,7 +211,11 @@ export class RadixRouter {
 
     // 3. Wildcard match
     if (node.wildcardChild) {
-      params['*'] = segments.slice(index).join('/')
+      let wildcardEnd = path.length
+      while (wildcardEnd > start && path.charCodeAt(wildcardEnd - 1) === 47) {
+        wildcardEnd--
+      }
+      params['*'] = path.slice(start, wildcardEnd)
       return node.wildcardChild
     }
 
