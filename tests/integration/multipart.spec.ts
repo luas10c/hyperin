@@ -1,8 +1,10 @@
 import { describe, expect, test } from '@jest/globals'
+import type { Readable } from 'node:stream'
 import request, { type Response } from 'supertest'
 
 import { hyperin } from '#/instance'
 import { multipart } from '#/multipart'
+import type { FileInfo } from '#/multipart'
 
 type UploadedFile = {
   fieldname: string
@@ -32,7 +34,7 @@ describe('multipart middleware', () => {
 
     app.use(
       multipart({
-        onFile: async (stream, info) => {
+        onFile: async (stream: Readable, info: FileInfo) => {
           const chunks: Buffer[] = []
 
           for await (const chunk of stream) {

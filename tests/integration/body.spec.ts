@@ -4,6 +4,8 @@ import { gzipSync } from 'node:zlib'
 
 import { json, urlencoded } from '#/body'
 import { hyperin } from '#/instance'
+import type { Request } from '#/request'
+import type { Response as HyperinResponse } from '#/response'
 
 type JsonObject = Record<string, unknown>
 
@@ -57,7 +59,7 @@ describe('body parsers', () => {
 
     app.use(
       json({
-        verify: (_req, _res, buf) => {
+        verify: (_req: Request, _res: HyperinResponse, buf: Buffer) => {
           if (buf.toString('utf8').includes('forbidden')) {
             const err: ErrorWithStatus = new Error('blocked')
             err.status = 401
