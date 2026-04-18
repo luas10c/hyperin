@@ -10,7 +10,7 @@ export default defineConfig({
         '^.+\\.(t|j)sx?$': '@swc/jest'
       },
       moduleNameMapper: {
-        '#^(.+)$': '<rootDir>/src/$1'
+        '^#/(.+)$': '<rootDir>/src/$1'
       }
     },
     {
@@ -22,7 +22,7 @@ export default defineConfig({
         '^.+\\.(t|j)sx?$': '@swc/jest'
       },
       moduleNameMapper: {
-        '#^(.+)$': '<rootDir>/src/$1'
+        '^#/(.+)$': '<rootDir>/src/$1'
       }
     }
   ]
