@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals'
 import request, { type Response } from 'supertest'
 import { gzipSync } from 'node:zlib'
 
-import { json, urlencoded } from '#/body'
+import { json, urlencoded } from '#/middleware/body'
 import { hyperin } from '#/instance'
 import type { Request } from '#/request'
 import type { Response as HyperinResponse } from '#/response'

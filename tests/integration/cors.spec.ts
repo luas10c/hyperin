@@ -1,7 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 import request, { type Response } from 'supertest'
 
-import { cors } from '#/cors'
+import { cors } from '#/middleware/cors'
 import { hyperin } from '#/instance'
 
 describe('cors middleware', () => {

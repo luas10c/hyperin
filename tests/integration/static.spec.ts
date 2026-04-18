@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import request, { type Response } from 'supertest'
 
 import { hyperin } from '#/instance'
-import { serveStatic } from '#/serve-static'
+import { serveStatic } from '#/middleware/serve-static'
 
 type StaticErrorResponse = {
   statusCode: number

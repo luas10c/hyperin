@@ -1,8 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 import request, { type Response } from 'supertest'
 
-import hyperin from '#/index'
-import { hyperin as createInstance } from '#/instance'
+import hyperin, { hyperin as createInstance } from '#/instance'
 
 type ErrorResponse = {
   error: string

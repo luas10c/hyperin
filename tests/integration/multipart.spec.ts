@@ -3,8 +3,7 @@ import type { Readable } from 'node:stream'
 import request, { type Response } from 'supertest'
 
 import { hyperin } from '#/instance'
-import { multipart } from '#/multipart'
-import type { FileInfo } from '#/multipart'
+import { multipart, type FileInfo } from '#/middleware/multipart'
 
 type UploadedFile = {
   fieldname: string
