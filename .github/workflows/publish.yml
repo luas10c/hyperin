@@ -22,6 +22,13 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run build --if-present
-      - run: npm publish --provenance --access public
+      - run: |
+          TAG="${{ github.event.release.tag_name }}"
+
+          if [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta)\.[0-9]+$ ]]; then
+            npm publish --provenance --access public --tag "${BASH_REMATCH[1]}"
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
