@@ -16,6 +16,19 @@ describe('instance integration', () => {
 
     expect(response.status).toBe(200)
     expect(response.text).toBe('ok')
+    expect(response.headers['x-powered-by']).toBe('Hyperin')
+  })
+
+  test('permite desabilitar o header x-powered-by', async () => {
+    const app = hyperin()
+
+    app.disable('x-powered-by')
+    app.get('/hello', () => 'ok')
+
+    const response: Response = await request(app).get('/hello')
+
+    expect(response.status).toBe(200)
+    expect(response.headers['x-powered-by']).toBeUndefined()
   })
 
   test('executa middlewares globais antes da rota', async () => {

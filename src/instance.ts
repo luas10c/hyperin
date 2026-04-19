@@ -56,6 +56,8 @@ export interface ShutdownOptions {
   signals?: NodeJS.Signals[]
 }
 
+export type AppSetting = 'x-powered-by'
+
 // RouteChain
 // ─────────────────────────────────────────────────────────────
 
@@ -166,23 +168,24 @@ interface RouteMethod<TSelf> {
   ): TSelf
 }
 
-type HyperinApp = Server<typeof Request, typeof Response> & {
+export interface Application extends Server<typeof Request, typeof Response> {
   use: {
     (path: string, ...handlers: Handler[]): void
     (handler: ErrorMiddleware): void
   }
+  disable: (setting: AppSetting) => Application
   mount: (
     prefix: string,
-    mounted: Hyperin | HyperinApp | { [HYPERIN_CORE]?: Hyperin }
-  ) => HyperinApp
-  get: RouteMethod<HyperinApp>
-  post: RouteMethod<HyperinApp>
-  put: RouteMethod<HyperinApp>
-  patch: RouteMethod<HyperinApp>
-  delete: RouteMethod<HyperinApp>
-  head: RouteMethod<HyperinApp>
-  options: RouteMethod<HyperinApp>
-  all: RouteMethod<HyperinApp>
+    mounted: Hyperin | Application | { [HYPERIN_CORE]?: Hyperin }
+  ) => Application
+  get: RouteMethod<Application>
+  post: RouteMethod<Application>
+  put: RouteMethod<Application>
+  patch: RouteMethod<Application>
+  delete: RouteMethod<Application>
+  head: RouteMethod<Application>
+  options: RouteMethod<Application>
+  all: RouteMethod<Application>
   route: Hyperin['route']
   shutdown: Hyperin['shutdown']
   graceful: Hyperin['graceful']
@@ -303,6 +306,7 @@ class Hyperin {
   #drainResolve: (() => void) | null = null
   // Signal handlers registered by graceful(), kept for cleanup.
   #signalHandlers: Array<{ signal: NodeJS.Signals; handler: () => void }> = []
+  #xPoweredByEnabled = true
 
   constructor(opts: RouterOptions = {}) {
     this.#prefix = opts.prefix || ''
@@ -437,6 +441,14 @@ class Hyperin {
     return this
   }
 
+  disable(setting: AppSetting): this {
+    if (setting === 'x-powered-by') {
+      this.#xPoweredByEnabled = false
+    }
+
+    return this
+  }
+
   #getRoutes(): [HttpMethod, string, Handler[]][] {
     return this.#router.routes
   }
@@ -475,6 +487,10 @@ class Hyperin {
 
     const request = rawRequest as Request
     const response = rawResponse as Response
+
+    if (this.#xPoweredByEnabled && !response.hasHeader('X-Powered-By')) {
+      response.setHeader('X-Powered-By', 'Hyperin')
+    }
 
     const rawUrl = request.url || '/'
     const { path, query } = parseRequestTarget(rawUrl)
@@ -741,7 +757,9 @@ class Hyperin {
   }
 }
 
-export function hyperin(): HyperinApp {
+export type Instance = Application
+
+export function hyperin(): Application {
   const core = new Hyperin()
 
   // Cria o http.Server imediatamente com as classes customizadas.
@@ -773,6 +791,10 @@ export function hyperin(): HyperinApp {
   // Métodos de rota e middleware são adicionados via Object.assign.
   const app = Object.assign(server, {
     use,
+    disable: (setting: AppSetting) => {
+      core.disable(setting)
+      return app
+    },
     mount: (
       prefix: string,
       mounted: Hyperin | { [HYPERIN_CORE]?: Hyperin }
@@ -784,35 +806,35 @@ export function hyperin(): HyperinApp {
     get: ((path: string, ...handlers: Handler[]) => {
       ;(core.get as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     post: ((path: string, ...handlers: Handler[]) => {
       ;(core.post as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     put: ((path: string, ...handlers: Handler[]) => {
       ;(core.put as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     patch: ((path: string, ...handlers: Handler[]) => {
       ;(core.patch as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     delete: ((path: string, ...handlers: Handler[]) => {
       ;(core.delete as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     head: ((path: string, ...handlers: Handler[]) => {
       ;(core.head as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     options: ((path: string, ...handlers: Handler[]) => {
       ;(core.options as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     all: ((path: string, ...handlers: Handler[]) => {
       ;(core.all as (...args: unknown[]) => unknown)(path, ...handlers)
       return app
-    }) as unknown as RouteMethod<HyperinApp>,
+    }) as unknown as RouteMethod<Application>,
     route: core.route.bind(core),
     shutdown: core.shutdown.bind(core),
     graceful: core.graceful.bind(core),
@@ -839,7 +861,7 @@ export function hyperin(): HyperinApp {
     }
   })
 
-  return app as HyperinApp
+  return app as Application
 }
 
 export default hyperin
