@@ -32,11 +32,30 @@ function createNode(): TrieNode {
   }
 }
 
+function isDynamicPath(path: string): boolean {
+  for (let i = 0; i < path.length; i++) {
+    const code = path.charCodeAt(i)
+    if (code === 42 || code === 58) return true
+  }
+
+  return false
+}
+
+function createStaticRouteKey(method: string, path: string): string {
+  return `${method} ${path}`
+}
+
 export interface MatchResult {
   handlers: Handler[]
   middlewares: Handler[]
   params: Record<string, string>
   matched: boolean
+}
+
+interface DynamicMatch {
+  node: TrieNode
+  paramNames: string[]
+  paramValues: string[]
 }
 
 function forEachPathSegment(
@@ -92,9 +111,11 @@ function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
 
 export class RadixRouter {
   private readonly root: TrieNode = createNode()
+  private readonly staticRoutes = new Map<string, Handler[]>()
   private readonly middlewares: Handler[] = []
   private readonly _errorMiddlewares: ErrorMiddleware[] = []
   private readonly _routes: [HttpMethod, string, Handler[]][] = []
+  private hasDynamicRoutes = false
 
   get routes(): [HttpMethod, string, Handler[]][] {
     return this._routes
@@ -116,6 +137,14 @@ export class RadixRouter {
 
   add(method: HttpMethod, path: string, handlers: Handler[]): void {
     this._routes.push([method, path, handlers])
+
+    if (!isDynamicPath(path)) {
+      this.staticRoutes.set(createStaticRouteKey(method, path), handlers)
+      return
+    }
+
+    this.hasDynamicRoutes = true
+
     let node = this.root
 
     forEachPathSegment(path, (segment) => {
@@ -143,41 +172,79 @@ export class RadixRouter {
   }
 
   match(method: string, path: string): MatchResult | null {
-    const params: Record<string, string> = {}
-    const node = this.#traverse(this.root, path, 0, params)
+    const staticHandlers =
+      this.staticRoutes.get(createStaticRouteKey(method, path)) ??
+      this.staticRoutes.get(createStaticRouteKey('ALL', path))
 
-    const routeHandlers = node?.isEnd
-      ? node.handlers.get(method as HttpMethod) || node.handlers.get('ALL')
+    if (staticHandlers) {
+      return {
+        handlers: staticHandlers,
+        middlewares: this.middlewares,
+        params: {},
+        matched: true
+      }
+    }
+
+    if (!this.hasDynamicRoutes) {
+      if (this.middlewares.length > 0) {
+        return {
+          handlers: [],
+          middlewares: this.middlewares,
+          params: {},
+          matched: false
+        }
+      }
+
+      return null
+    }
+
+    const dynamicMatch = this.#traverse(this.root, path, 0, [], [])
+
+    const routeHandlers = dynamicMatch?.node.isEnd
+      ? dynamicMatch.node.handlers.get(method as HttpMethod) ||
+        dynamicMatch.node.handlers.get('ALL')
       : null
 
-    const result: MatchResult | null = routeHandlers
-      ? {
-          handlers: routeHandlers,
-          middlewares: this.middlewares,
-          params,
-          matched: true
-        }
-      : this.middlewares.length > 0
-        ? {
-            handlers: [],
-            middlewares: this.middlewares,
-            params: {},
-            matched: false
-          }
-        : null
+    if (dynamicMatch && routeHandlers) {
+      return {
+        handlers: routeHandlers,
+        middlewares: this.middlewares,
+        params: this.#buildParams(
+          dynamicMatch.paramNames,
+          dynamicMatch.paramValues
+        ),
+        matched: true
+      }
+    }
 
-    return result
+    if (this.middlewares.length > 0) {
+      return {
+        handlers: [],
+        middlewares: this.middlewares,
+        params: {},
+        matched: false
+      }
+    }
+
+    return null
   }
 
   #traverse(
     node: TrieNode,
     path: string,
     index: number,
-    params: Record<string, string>
-  ): TrieNode | null {
+    paramNames: string[],
+    paramValues: string[]
+  ): DynamicMatch | null {
     let start = index
     while (start < path.length && path.charCodeAt(start) === 47) start++
-    if (start >= path.length) return node
+    if (start >= path.length) {
+      return {
+        node,
+        paramNames: [...paramNames],
+        paramValues: [...paramValues]
+      }
+    }
 
     let end = start + 1
     while (end < path.length && path.charCodeAt(end) !== 47) end++
@@ -189,24 +256,30 @@ export class RadixRouter {
     const exactChild = node.children.get(segment)
 
     if (exactChild) {
-      const result = this.#traverse(exactChild, path, nextIndex, params)
+      const result = this.#traverse(
+        exactChild,
+        path,
+        nextIndex,
+        paramNames,
+        paramValues
+      )
       if (result) return result
     }
 
     // 2. Param match
     if (node.paramChild) {
-      const paramName = node.paramChild.paramName!
-      const hadKey = paramName in params
-      const prevValue = params[paramName]
-      params[paramName] = segment
-      const result = this.#traverse(node.paramChild, path, nextIndex, params)
+      paramNames.push(node.paramChild.paramName!)
+      paramValues.push(segment)
+      const result = this.#traverse(
+        node.paramChild,
+        path,
+        nextIndex,
+        paramNames,
+        paramValues
+      )
       if (result) return result
-      // Restore params on backtrack — without allocating an object
-      if (hadKey) {
-        params[paramName] = prevValue
-      } else {
-        delete params[paramName]
-      }
+      paramNames.pop()
+      paramValues.pop()
     }
 
     // 3. Wildcard match
@@ -215,10 +288,25 @@ export class RadixRouter {
       while (wildcardEnd > start && path.charCodeAt(wildcardEnd - 1) === 47) {
         wildcardEnd--
       }
-      params['*'] = path.slice(start, wildcardEnd)
-      return node.wildcardChild
+      return {
+        node: node.wildcardChild,
+        paramNames: [...paramNames, '*'],
+        paramValues: [...paramValues, path.slice(start, wildcardEnd)]
+      }
     }
 
     return null
+  }
+
+  #buildParams(names: string[], values: string[]): Record<string, string> {
+    if (names.length === 0) return {}
+
+    const params: Record<string, string> = {}
+
+    for (let i = 0; i < names.length; i++) {
+      params[names[i]] = values[i]
+    }
+
+    return params
   }
 }
