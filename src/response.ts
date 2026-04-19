@@ -6,13 +6,25 @@ import type { Request } from './request'
 // Response
 // ─────────────────────────────────────────────────────────────
 
-interface CookieOptions {
+export interface CookieOptions {
   maxAge?: number
+  expires?: Date
   domain?: string
   path?: string
   secure?: boolean
   httpOnly?: boolean
-  sameSite?: string
+  sameSite?: 'Strict' | 'Lax' | 'None' | 'strict' | 'lax' | 'none'
+}
+
+type CookieTuple = [name: string, value: string, options?: CookieOptions]
+
+function appendHeaderValue(
+  current: number | string | string[] | readonly string[] | undefined,
+  value: string
+): string | readonly string[] {
+  if (current === undefined) return value
+  if (Array.isArray(current)) return [...current, value]
+  return [String(current), value]
 }
 
 export class Response extends ServerResponse<Request> {
@@ -117,16 +129,45 @@ export class Response extends ServerResponse<Request> {
     return this
   }
 
-  cookie(name: string, value: string, options: CookieOptions = {}): this {
-    let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`
-    cookie += `; Path=${options.path ?? '/'}`
+  cookie(name: string, value: string, options?: CookieOptions): this
+  cookie(input: CookieTuple): this
+  cookie(
+    nameOrInput: string | CookieTuple,
+    value?: string,
+    options: CookieOptions = {}
+  ): this {
+    const [name, resolvedValue, resolvedOptions] = Array.isArray(nameOrInput)
+      ? [nameOrInput[0], nameOrInput[1], nameOrInput[2] ?? {}]
+      : [nameOrInput, value ?? '', options]
 
-    if (options.maxAge) cookie += `; Max-Age=${options.maxAge}`
-    if (options.domain) cookie += `; Domain=${options.domain}`
-    if (options.secure) cookie += '; Secure'
-    if (options.httpOnly) cookie += '; HttpOnly'
-    if (options.sameSite) cookie += `; SameSite=${options.sameSite}`
-    this.setHeader('Set-Cookie', cookie)
+    let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(resolvedValue)}`
+    cookie += `; Path=${resolvedOptions.path ?? '/'}`
+
+    if (resolvedOptions.maxAge !== undefined) {
+      cookie += `; Max-Age=${resolvedOptions.maxAge}`
+    }
+    if (resolvedOptions.expires) {
+      cookie += `; Expires=${resolvedOptions.expires.toUTCString()}`
+    }
+    if (resolvedOptions.domain) cookie += `; Domain=${resolvedOptions.domain}`
+    if (resolvedOptions.secure) cookie += '; Secure'
+    if (resolvedOptions.httpOnly) cookie += '; HttpOnly'
+    if (resolvedOptions.sameSite) {
+      cookie += `; SameSite=${resolvedOptions.sameSite}`
+    }
+
+    this.setHeader(
+      'Set-Cookie',
+      appendHeaderValue(this.getHeader('Set-Cookie'), cookie)
+    )
     return this
+  }
+
+  clearCookie(name: string, options: Omit<CookieOptions, 'maxAge'> = {}): this {
+    return this.cookie(name, '', {
+      ...options,
+      expires: new Date(0),
+      maxAge: 0
+    })
   }
 }

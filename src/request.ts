@@ -26,10 +26,14 @@ export class Request<
   params = {} as TParams
   /** Parsed query string */
   query = {} as TQuery
-  /** Parsed body (requires bodyParser middleware) */
+  /** Parsed body (requires json middleware) */
   body = undefined as TBody
   /** Uploaded files (requires multipart middleware) */
   files: Record<string, unknown> = {}
+  /** Parsed cookies (requires cookies middleware) */
+  cookies: Record<string, string> = {}
+  /** Parsed and verified signed cookies (requires cookies middleware) */
+  signedCookies: Record<string, string> = {}
   /** Custom state bag for middleware communication */
   locals: Record<string, unknown> = {}
 
