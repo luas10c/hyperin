@@ -7,7 +7,7 @@
     "performance",
     "secure"
   ],
-  "version": "0.0.1-beta.4",
+  "version": "0.0.1-beta.5",
   "files": [
     "dist",
     "README.md",
@@ -25,6 +25,9 @@
       "default": "./dist/middleware/index.js",
       "import": "./dist/middleware/index.js",
       "types": "./dist/middleware/index.d.ts"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts"
     }
   },
   "type": "module",
