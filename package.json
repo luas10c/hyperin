@@ -26,6 +26,11 @@
       "import": "./dist/middleware/index.js",
       "types": "./dist/middleware/index.d.ts"
     },
+    "./openapi": {
+      "default": "./dist/openapi.js",
+      "import": "./dist/openapi.js",
+      "types": "./dist/openapi.d.ts"
+    },
     "./types": {
       "types": "./dist/types.d.ts"
     }
@@ -36,7 +41,7 @@
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "tsc-alias -f -p tsconfig.build.json",
     "bench": "npm run build && node benchmarks/http.js",
-    "lint": "eslint . --cache",
+    "lint": "eslint --cache",
     "test": "jest --passWithNoTests",
     "test:ci": "jest --passWithNoTests --ci",
     "test:watch": "jest --passWithNoTests --watch",

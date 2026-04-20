@@ -10,11 +10,16 @@ import type { ParsedUrlQuery } from 'node:querystring'
 import { Request } from './request'
 import { Response } from './response'
 import { RadixRouter } from './router'
+import { validate } from './validation'
+import { describeOperation } from './openapi'
+import type { DescribeOperationInput } from './openapi'
 import type {
   ApplyMiddleware,
+  ApplyRouteOptions,
   ErrorMiddleware,
   Handler,
   RequestRefinement,
+  RouteSchemaOptions,
   RouteRequest,
   TypedMiddleware
 } from './types'
@@ -114,6 +119,137 @@ type RouteStep5<
 >
 
 interface RouteMethod<TSelf> {
+  <const TPath extends string, TOptions extends RouteSchemaOptions>(
+    path: TPath,
+    handler: TypedMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
+    options: TOptions
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>
+  >(
+    path: TPath,
+    h1: T1,
+    options: TOptions
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2,
+    options: TOptions
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >
+    >
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2,
+    h3: T3,
+    options: TOptions
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >
+    >,
+    T4 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+          T2
+        >,
+        T3
+      >
+    >
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2,
+    h3: T3,
+    h4: T4,
+    options: TOptions
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >
+    >,
+    T4 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+          T2
+        >,
+        T3
+      >
+    >,
+    T5 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<
+            ApplyMiddleware<
+              ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
+              T1
+            >,
+            T2
+          >,
+          T3
+        >,
+        T4
+      >
+    >
+  >(
+    path: TPath,
+    h1: T1,
+    h2: T2,
+    h3: T3,
+    h4: T4,
+    h5: T5,
+    options: TOptions
+  ): TSelf
   <const TPath extends string, T1 extends RouteStep1<TPath>>(
     path: TPath,
     h1: T1
@@ -285,6 +421,44 @@ function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
   )
 }
 
+function isRouteSchemaOptions(value: unknown): value is RouteSchemaOptions {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function buildRouteOptionHandlers(options: RouteSchemaOptions): Handler[] {
+  const handlers: Handler[] = []
+
+  if (options.params !== undefined)
+    handlers.push(validate.params(options.params))
+  if (options.query !== undefined) handlers.push(validate.query(options.query))
+  if (options.body !== undefined) handlers.push(validate.body(options.body))
+
+  const operation: DescribeOperationInput = {
+    ...(typeof options.summary === 'string'
+      ? { summary: options.summary }
+      : {}),
+    ...(typeof options.description === 'string'
+      ? { description: options.description }
+      : {}),
+    ...(typeof options.operationId === 'string'
+      ? { operationId: options.operationId }
+      : {}),
+    ...(Array.isArray(options.tags) ? { tags: options.tags } : {}),
+    ...(typeof options.deprecated === 'boolean'
+      ? { deprecated: options.deprecated }
+      : {}),
+    ...(options.responses
+      ? { responses: options.responses as DescribeOperationInput['responses'] }
+      : {})
+  }
+
+  if (Object.keys(operation).length > 0) {
+    handlers.push(describeOperation(operation))
+  }
+
+  return handlers
+}
+
 // ─────────────────────────────────────────────────────────────
 // Hyperin
 // ─────────────────────────────────────────────────────────────
@@ -366,35 +540,59 @@ class Hyperin {
   // Route registration
   // ──────────────────────────────────────────────
 
-  get(path: string, ...handlers: Handler[]): this {
+  get(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('GET', path, handlers)
   }
 
-  post(path: string, ...handlers: Handler[]): this {
+  post(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('POST', path, handlers)
   }
 
-  put(path: string, ...handlers: Handler[]): this {
+  put(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('PUT', path, handlers)
   }
 
-  patch(path: string, ...handlers: Handler[]): this {
+  patch(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('PATCH', path, handlers)
   }
 
-  delete(path: string, ...handlers: Handler[]): this {
+  delete(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('DELETE', path, handlers)
   }
 
-  head(path: string, ...handlers: Handler[]): this {
+  head(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('HEAD', path, handlers)
   }
 
-  options(path: string, ...handlers: Handler[]): this {
+  options(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('OPTIONS', path, handlers)
   }
 
-  all(path: string, ...handlers: Handler[]): this {
+  all(
+    path: string,
+    ...handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     return this.#addRoute('ALL', path, handlers)
   }
 
@@ -453,9 +651,22 @@ class Hyperin {
     return this.#router.routes
   }
 
-  #addRoute(method: HttpMethod, path: string, handlers: Handler[]): this {
+  #addRoute(
+    method: HttpMethod,
+    path: string,
+    handlers: [...Handler[], RouteSchemaOptions] | Handler[]
+  ): this {
     const fullPath = this.#prefix + path
-    this.#router.add(method, fullPath || '/', handlers)
+    const lastHandler = handlers[handlers.length - 1]
+    const normalizedHandlers =
+      handlers.length > 0 && isRouteSchemaOptions(lastHandler)
+        ? [
+            ...buildRouteOptionHandlers(lastHandler),
+            ...(handlers.slice(0, -1) as Handler[])
+          ]
+        : (handlers as Handler[])
+
+    this.#router.add(method, fullPath || '/', normalizedHandlers)
     return this
   }
 

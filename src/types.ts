@@ -31,6 +31,60 @@ export type RequestRefinement = {
   query?: Record<string, unknown>
 }
 
+export interface StandardSchemaV1Types<TInput = unknown, TOutput = TInput> {
+  readonly input: TInput
+  readonly output: TOutput
+}
+
+export interface StandardSchemaV1Result<TOutput = unknown> {
+  readonly value?: TOutput
+  readonly issues?: readonly unknown[]
+}
+
+export interface StandardSchemaV1<TInput = unknown, TOutput = TInput> {
+  readonly '~standard': {
+    readonly version?: 1
+    readonly vendor?: string
+    readonly validate: (
+      value: unknown,
+      options?: unknown
+    ) =>
+      | StandardSchemaV1Result<TOutput>
+      | Promise<StandardSchemaV1Result<TOutput>>
+    readonly types?: StandardSchemaV1Types<TInput, TOutput>
+    readonly jsonSchema?: {
+      readonly input?: (options: { target: string }) => Record<string, unknown>
+    }
+  }
+}
+
+type InferZodLikeSchema<TSchema> = TSchema extends {
+  safeParse: (input: unknown) => infer TResult
+}
+  ? Extract<TResult, { success: true }> extends { data: infer TData }
+    ? TData
+    : unknown
+  : never
+
+export type InferSchemaOutput<TSchema> =
+  TSchema extends StandardSchemaV1<unknown, infer TOutput>
+    ? TOutput
+    : InferZodLikeSchema<TSchema> extends never
+      ? unknown
+      : InferZodLikeSchema<TSchema>
+
+export interface RouteSchemaOptions {
+  body?: unknown
+  params?: unknown
+  query?: unknown
+  summary?: string
+  description?: string
+  operationId?: string
+  tags?: string[]
+  deprecated?: boolean
+  responses?: Record<string | number, unknown>
+}
+
 export type TypedMiddleware<
   TRequest extends Request = Request,
   TRefinement extends RequestRefinement = Record<never, never>
@@ -98,4 +152,25 @@ export type RouteRequest<TPath extends string> = Request<
   Request['body'],
   RouteParams<TPath>,
   ParsedUrlQuery
+>
+
+export type ApplyRouteOptions<
+  TRequest extends Request,
+  TOptions extends RouteSchemaOptions
+> = Request<
+  TOptions extends { body: infer TBody }
+    ? unknown extends InferSchemaOutput<TBody>
+      ? TRequest['body']
+      : InferSchemaOutput<TBody>
+    : TRequest['body'],
+  TOptions extends { params: infer TParams }
+    ? InferSchemaOutput<TParams> extends Record<string, unknown>
+      ? InferSchemaOutput<TParams>
+      : TRequest['params']
+    : TRequest['params'],
+  TOptions extends { query: infer TQuery }
+    ? InferSchemaOutput<TQuery> extends Record<string, unknown>
+      ? InferSchemaOutput<TQuery>
+      : TRequest['query']
+    : TRequest['query']
 >
