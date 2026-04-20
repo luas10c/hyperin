@@ -203,9 +203,14 @@ describe('openapi integration', () => {
         expect.objectContaining({ name: 'invite', in: 'query' })
       ])
     )
-    expect(operation.requestBody.content['application/json'].schema.$ref).toBe(
-      '#/components/schemas/POSTUsersIdRequestBody'
-    )
+    expect(operation.requestBody.content['application/json'].schema).toEqual({
+      type: 'object',
+      properties: {
+        email: { type: 'string' },
+        password: { type: 'string' }
+      },
+      required: ['email', 'password']
+    })
     expect(operation.responses['201'].description).toBe('User created')
   })
 

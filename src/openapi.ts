@@ -223,7 +223,7 @@ function withNullability(
 export function schemaToOpenAPI(schema: unknown): OpenAPISchema {
   if (typeof schema === 'string') {
     return modelRegistry.has(schema)
-      ? { $ref: `#/components/schemas/${schema}` }
+      ? cloneSchema(modelRegistry.get(schema) as OpenAPISchema)
       : { type: 'string' }
   }
 
@@ -580,52 +580,8 @@ function recordOperation(
   })
 }
 
-function sanitizeComponentNamePart(value: string): string {
-  const cleaned = value.replace(/[^a-zA-Z0-9]+/g, ' ')
-  const words = cleaned.split(' ').filter(Boolean)
-  const pascal = words
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join('')
-  return pascal || 'Root'
-}
-
-function buildComponentName(
-  method: string,
-  path: string,
-  suffix: string
-): string {
-  return `${sanitizeComponentNamePart(method)}${sanitizeComponentNamePart(path)}${suffix}`
-}
-
 function cloneSchema(schema: OpenAPISchema): OpenAPISchema {
   return JSON.parse(JSON.stringify(schema)) as OpenAPISchema
-}
-
-function extractComponentsFromOperation(
-  method: string,
-  path: string,
-  operation: OpenAPIOperation,
-  components: Record<string, OpenAPISchema>
-): OpenAPIOperation {
-  const nextOperation = JSON.parse(
-    JSON.stringify(operation)
-  ) as OpenAPIOperation
-  const bodySchema =
-    nextOperation.requestBody?.content?.['application/json']?.schema
-
-  if (
-    bodySchema &&
-    !bodySchema.$ref &&
-    (bodySchema.type === 'object' || bodySchema.type === 'array')
-  ) {
-    const componentName = buildComponentName(method, path, 'RequestBody')
-    components[componentName] = cloneSchema(bodySchema)
-    nextOperation.requestBody!.content['application/json'].schema = {
-      $ref: `#/components/schemas/${componentName}`
-    }
-  }
-
-  return nextOperation
 }
 
 async function extractHandlerOperation(
@@ -691,20 +647,13 @@ async function resolveRouteOperation(
 
 export async function getOpenAPIDocument(): Promise<OpenAPIDocument> {
   const paths: OpenAPIDocument['paths'] = {}
-  const schemas: Record<string, OpenAPISchema> =
-    Object.fromEntries(modelRegistry)
 
   for (const route of routeRegistry.values()) {
     const operation = await resolveRouteOperation(route)
     if (!operation) continue
 
     const pathItem = (paths[route.path] ??= {})
-    pathItem[route.method.toLowerCase()] = extractComponentsFromOperation(
-      route.method,
-      route.path,
-      operation,
-      schemas
-    )
+    pathItem[route.method.toLowerCase()] = operation
   }
 
   return {
@@ -720,8 +669,7 @@ export async function getOpenAPIDocument(): Promise<OpenAPIDocument> {
     ...(currentOptions.documentation?.servers
       ? { servers: currentOptions.documentation.servers }
       : {}),
-    paths,
-    ...(Object.keys(schemas).length > 0 ? { components: { schemas } } : {})
+    paths
   }
 }
 
