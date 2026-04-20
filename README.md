@@ -1,4 +1,4 @@
-# hyperin
+[![Hyperin Logo](https://github.com/luas10c/hyperin/blob/main/hyperin.png?raw=true)](https://github.com/luas10c/hyperin)
 
 Fast, modern, minimalist web framework for Node.js.
 
