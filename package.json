@@ -31,6 +31,11 @@
       "import": "./dist/openapi.js",
       "types": "./dist/openapi.d.ts"
     },
+    "./scalar": {
+      "default": "./dist/scalar.js",
+      "import": "./dist/scalar.js",
+      "types": "./dist/scalar.d.ts"
+    },
     "./types": {
       "types": "./dist/types.d.ts"
     }
