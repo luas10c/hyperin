@@ -45,7 +45,6 @@
     "prebuild": "rimraf dist",
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "tsc-alias -f -p tsconfig.build.json",
-    "bench": "npm run build && node benchmarks/http.js",
     "lint": "eslint --cache",
     "test": "jest --passWithNoTests",
     "test:ci": "jest --passWithNoTests --ci",
