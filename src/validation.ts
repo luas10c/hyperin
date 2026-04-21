@@ -18,14 +18,7 @@ type Middleware = (ctx: {
   next: NextFunction
 }) => void | Promise<void>
 
-type MaybeZodLike = {
-  safeParse: (input: unknown) => {
-    success: boolean
-    data?: unknown
-    error?: unknown
-  }
-}
-type SchemaInput = StandardSchemaV1 | MaybeZodLike | unknown
+type SchemaInput = StandardSchemaV1 | unknown
 type RequestSource = 'body' | 'params' | 'query'
 type RequestData = Pick<Request, RequestSource>
 type ValidationOutcome =
@@ -43,14 +36,7 @@ type ValidateQueryRefinement<TQuery extends Record<string, unknown>> = {
 type ValidatorRunner = (data: unknown) => Promise<ValidationOutcome>
 type PreparedValidator = {
   source: RequestSource
-  kind: 'zod' | 'standard'
   run: ValidatorRunner
-}
-
-function isZodLike(s: unknown): s is MaybeZodLike {
-  return (
-    s != null && typeof (s as { safeParse?: unknown }).safeParse === 'function'
-  )
 }
 
 function isStandardSchemaLike(schema: unknown): schema is StandardSchemaV1 {
@@ -59,22 +45,6 @@ function isStandardSchemaLike(schema: unknown): schema is StandardSchemaV1 {
     typeof schema === 'object' &&
     typeof (schema as StandardSchemaV1)['~standard']?.validate === 'function'
   )
-}
-
-function formatZodError(result: { error?: unknown }): unknown {
-  const errorObj = result.error as
-    | { format?: () => unknown; message?: unknown; issues?: unknown }
-    | undefined
-
-  if (Array.isArray(errorObj?.issues)) {
-    return errorObj.issues
-  }
-
-  if (typeof errorObj?.format === 'function') {
-    return errorObj.format()
-  }
-
-  return [{ message: errorObj?.message ?? result.error }]
 }
 
 function getRequestValue(request: RequestData, source: RequestSource): unknown {
@@ -115,30 +85,13 @@ function createPreparedValidator(
   if (isStandardSchemaLike(schema)) {
     return {
       source,
-      kind: 'standard',
       run: async (data: unknown): Promise<ValidationOutcome> =>
         normalizeStandardResult(await schema['~standard'].validate(data))
     }
   }
 
-  if (isZodLike(schema)) {
-    return {
-      source,
-      kind: 'zod',
-      run: async (data: unknown): Promise<ValidationOutcome> => {
-        const result = schema.safeParse(data)
-        if (result.success) {
-          return { ok: true, data: result.data }
-        }
-
-        return { ok: false, details: formatZodError(result) }
-      }
-    }
-  }
-
   return {
     source,
-    kind: 'standard',
     run: async (): Promise<ValidationOutcome> => ({ ok: true })
   }
 }
@@ -179,7 +132,7 @@ function createValidator(
 
   return attachOpenAPIFragmentMetadata(
     middleware as unknown as TypedMiddleware,
-    createOpenAPIOperationFragment(source, schema)
+    () => createOpenAPIOperationFragment(source, schema)
   ) as unknown as Middleware
 }
 
