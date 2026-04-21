@@ -1,5 +1,13 @@
 import type { Application } from './instance'
 
+function getOpenAPISlug(url: string): string {
+  const pathname = url.split('?')[0]?.split('#')[0] ?? ''
+  const segment = pathname.split('/').filter(Boolean).pop() ?? 'openapi.json'
+  const [name] = segment.split('.')
+
+  return name || 'openapi'
+}
+
 export type ScalarTheme =
   | 'default'
   | 'alternate'
@@ -86,9 +94,8 @@ export interface ScalarConfiguration {
 export interface ScalarOptions {
   /** @default /docs */
   path?: string
-  /** @default openapi.json */
+  /** @default /openapi.json */
   url?: string
-  title?: string
   darkMode?: boolean
   hideDarkModeToggle?: boolean
   configuration?: ScalarConfiguration
@@ -115,10 +122,13 @@ function serializeScriptValue(value: unknown): string {
 }
 
 function createScalarDocument(options?: ScalarOptions): string {
-  const title = escapeHtml(options?.title ?? 'API Reference')
+  const openapiUrl = options?.url ?? '/openapi.json'
+  const defaultDescription = escapeHtml('API Reference')
+  const slug = getOpenAPISlug(openapiUrl)
   const configuration = serializeScriptValue({
     ...(options?.configuration ?? {}),
-    url: options?.url ?? 'openapi.json',
+    url: openapiUrl,
+    slug,
     ...(typeof options?.darkMode === 'boolean'
       ? { darkMode: options.darkMode }
       : {}),
@@ -132,14 +142,36 @@ function createScalarDocument(options?: ScalarOptions): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
+    <meta name="description" content="${defaultDescription}" />
+    <title>API Reference</title>
   </head>
   <body>
     <div id="app"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
     <script>
-      Scalar.createApiReference('#app', ${configuration})
+      fetch(${serializeScriptValue(openapiUrl)})
+        .then((response) => response.ok ? response.json() : null)
+        .then((documentSpec) => {
+          const descriptionElement = document.querySelector('meta[name="description"]')
+
+          if (typeof documentSpec?.info?.title === 'string' && documentSpec.info.title !== '') {
+            document.title = documentSpec.info.title
+          }
+
+          if (
+            descriptionElement &&
+            typeof documentSpec?.info?.description === 'string' &&
+            documentSpec.info.description !== ''
+          ) {
+            descriptionElement.setAttribute('content', documentSpec.info.description)
+          }
+
+          Scalar.createApiReference('#app', ${configuration})
+        })
+        .catch(() => {
+          Scalar.createApiReference('#app', ${configuration})
+        })
     </script>
   </body>
 </html>
@@ -148,9 +180,9 @@ function createScalarDocument(options?: ScalarOptions): string {
 
 export function scalar<TApp extends Pick<Application, 'get'>>(
   app: TApp,
-  options: ScalarOptions
+  options?: ScalarOptions
 ): TApp {
-  const path = normalizePath(options.path, '/docs')
+  const path = normalizePath(options?.path, '/docs')
   const html = createScalarDocument(options)
 
   app.get(path, ({ response }) => {

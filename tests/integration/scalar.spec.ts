@@ -2,11 +2,22 @@ import { describe, expect, test } from '@jest/globals'
 import request from 'supertest'
 
 import hyperin from '#/instance'
+import { openapi } from '#/openapi'
 import { scalar } from '#/scalar'
 
 describe('scalar integration', () => {
   test('expoe a ui do scalar em uma rota customizada', async () => {
     const app = hyperin()
+
+    openapi(app, {
+      documentation: {
+        info: {
+          title: 'Framework API',
+          description: 'Framework HTTP API reference',
+          version: '1.0.0'
+        }
+      }
+    })
 
     scalar(app, {
       path: '/docs',
@@ -14,7 +25,8 @@ describe('scalar integration', () => {
       configuration: {
         theme: 'purple',
         proxyUrl: 'https://proxy.scalar.test',
-        layout: 'modern'
+        layout: 'modern',
+        title: 'Ignored title' as never
       }
     })
 
@@ -26,9 +38,18 @@ describe('scalar integration', () => {
       'https://cdn.jsdelivr.net/npm/@scalar/api-reference'
     )
     expect(response.text).toContain("Scalar.createApiReference('#app', {")
+    expect(response.text).toContain("fetch(\"/openapi.json\")")
+    expect(response.text).toContain(
+      '<meta name="description" content="API Reference" />'
+    )
     expect(response.text).toContain('"url":"/openapi.json"')
+    expect(response.text).toContain('"slug":"openapi"')
     expect(response.text).toContain('"theme":"purple"')
     expect(response.text).toContain('"proxyUrl":"https://proxy.scalar.test"')
     expect(response.text).toContain('"layout":"modern"')
+    expect(response.text).toContain(
+      `descriptionElement.setAttribute('content', documentSpec.info.description)`
+    )
+    expect(response.text).not.toContain('Ignored title')
   })
 })
