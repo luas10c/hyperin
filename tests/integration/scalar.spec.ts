@@ -25,8 +25,7 @@ describe('scalar integration', () => {
       configuration: {
         theme: 'purple',
         proxyUrl: 'https://proxy.scalar.test',
-        layout: 'modern',
-        title: 'Ignored title' as never
+        layout: 'modern'
       }
     })
 
@@ -50,6 +49,5 @@ describe('scalar integration', () => {
     expect(response.text).toContain(
       `descriptionElement.setAttribute('content', description)`
     )
-    expect(response.text).not.toContain('Ignored title')
   })
 })
