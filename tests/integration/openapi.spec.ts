@@ -1,8 +1,8 @@
+import { afterEach, describe, expect, test } from '@jest/globals'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, test } from '@jest/globals'
 import request from 'supertest'
 
 import hyperin from '#/instance'
@@ -58,6 +58,53 @@ function numberSchema() {
         input(options?: { target: string }) {
           void options
           return { type: 'number' }
+        }
+      }
+    }
+  }
+}
+
+function draft07OnlyObjectSchema(
+  inputProperties: Record<string, Record<string, unknown>>,
+  required: string[],
+  outputProperties: Record<string, Record<string, unknown>> = inputProperties,
+  outputRequired: string[] = required
+) {
+  return {
+    '~standard': {
+      version: 1 as const,
+      vendor: 'test-draft07-only',
+      validate(value: unknown) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          return { issues: [{ message: 'Expected object' }] }
+        }
+
+        return { value }
+      },
+      jsonSchema: {
+        input(options: { target: string }) {
+          if (options.target !== 'draft-07') {
+            throw new Error(`Unsupported target: ${options.target}`)
+          }
+
+          return {
+            type: 'object',
+            properties: inputProperties,
+            required,
+            additionalProperties: false
+          }
+        },
+        output(options: { target: string }) {
+          if (options.target !== 'draft-07') {
+            throw new Error(`Unsupported target: ${options.target}`)
+          }
+
+          return {
+            type: 'object',
+            properties: outputProperties,
+            required: outputRequired,
+            additionalProperties: false
+          }
         }
       }
     }
@@ -363,6 +410,125 @@ describe('openapi integration', () => {
           message: 'Invalid input: expected string, received null'
         }
       ]
+    })
+  })
+
+  test('documenta standard schema com fallback draft-07 e output para responses', async () => {
+    const app = hyperin()
+    const createUserBody = draft07OnlyObjectSchema(
+      {
+        email: { type: 'string', format: 'email' },
+        password: { type: 'string', minLength: 8 }
+      },
+      ['email', 'password']
+    )
+    const createUserResponse = draft07OnlyObjectSchema(
+      {
+        ignored: { type: 'boolean' }
+      },
+      [],
+      {
+        id: { type: 'number' },
+        email: { type: 'string', format: 'email' }
+      },
+      ['id', 'email']
+    )
+
+    app.use(json())
+
+    app.post(
+      '/register',
+      ({ response }) => {
+        response.status(201)
+        return { id: 1, email: 'john@example.com' }
+      },
+      {
+        body: createUserBody,
+        responses: {
+          201: {
+            description: 'Created',
+            content: {
+              'application/json': {
+                schema: createUserResponse
+              }
+            }
+          }
+        }
+      }
+    )
+
+    openapi(app)
+
+    const documentResponse = await request(app).get('/openapi.json')
+    const operation = documentResponse.body.paths['/register'].post
+
+    expect(documentResponse.status).toBe(200)
+    expect(operation.requestBody.content['application/json'].schema).toEqual({
+      type: 'object',
+      properties: {
+        email: { type: 'string', format: 'email' },
+        password: { type: 'string', minLength: 8 }
+      },
+      required: ['email', 'password'],
+      additionalProperties: false
+    })
+    expect(
+      operation.responses['201'].content['application/json'].schema
+    ).toEqual({
+      type: 'object',
+      properties: {
+        id: { type: 'number' },
+        email: { type: 'string', format: 'email' }
+      },
+      required: ['id', 'email'],
+      additionalProperties: false
+    })
+  })
+
+  test('usa mapJsonSchema para vendors sem Standard JSON Schema nativo', async () => {
+    const app = hyperin()
+    const createUserBody = {
+      '~standard': {
+        version: 1 as const,
+        vendor: 'custom-vendor',
+        validate(value: unknown) {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return { issues: [{ message: 'Expected object' }] }
+          }
+
+          return { value }
+        }
+      }
+    }
+
+    app.post('/', () => ({ ok: true }), {
+      body: createUserBody
+    })
+
+    openapi(app, {
+      mapJsonSchema: {
+        'custom-vendor': () => ({
+          type: 'object',
+          properties: {
+            email: { type: 'string', format: 'email' },
+            password: { type: 'string', minLength: 8 }
+          },
+          required: ['email', 'password']
+        })
+      }
+    })
+
+    const documentResponse = await request(app).get('/openapi.json')
+    const operation = documentResponse.body.paths['/'].post
+
+    expect(documentResponse.status).toBe(200)
+    expect(operation.requestBody.content['application/json'].schema).toEqual({
+      type: 'object',
+      properties: {
+        email: { type: 'string', format: 'email' },
+        password: { type: 'string', minLength: 8 }
+      },
+      required: ['email', 'password']
     })
   })
 })

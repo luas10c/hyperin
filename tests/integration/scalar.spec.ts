@@ -38,17 +38,17 @@ describe('scalar integration', () => {
       'https://cdn.jsdelivr.net/npm/@scalar/api-reference'
     )
     expect(response.text).toContain("Scalar.createApiReference('#app', {")
-    expect(response.text).toContain("fetch(\"/openapi.json\")")
-    expect(response.text).toContain(
-      '<meta name="description" content="API Reference" />'
-    )
+    expect(response.text).toContain('fetch("/openapi.json")')
+    expect(response.text).toContain('<meta name="description" content="" />')
+    expect(response.text).toContain('<title>API Reference</title>')
     expect(response.text).toContain('"url":"/openapi.json"')
     expect(response.text).toContain('"slug":"openapi"')
     expect(response.text).toContain('"theme":"purple"')
     expect(response.text).toContain('"proxyUrl":"https://proxy.scalar.test"')
     expect(response.text).toContain('"layout":"modern"')
+    expect(response.text).toContain('document.title = title')
     expect(response.text).toContain(
-      `descriptionElement.setAttribute('content', documentSpec.info.description)`
+      `descriptionElement.setAttribute('content', description)`
     )
     expect(response.text).not.toContain('Ignored title')
   })
