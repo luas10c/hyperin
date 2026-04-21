@@ -19,6 +19,7 @@ export interface OpenAPISchema {
   properties?: Record<string, OpenAPISchema>
   required?: string[]
   default?: unknown
+  [key: string]: unknown
 }
 
 export interface OpenAPIHeader {
@@ -114,8 +115,13 @@ type OperationMetadata =
   | OperationFragment
   | OpenAPIOperation
   | Promise<OperationFragment | OpenAPIOperation>
+  | (() =>
+      | OperationFragment
+      | OpenAPIOperation
+      | Promise<OperationFragment | OpenAPIOperation>)
 type StandardSchemaLike = {
   '~standard'?: {
+    version?: number
     vendor?: string
     validate?: (
       value: unknown,
@@ -125,14 +131,25 @@ type StandardSchemaLike = {
       | Promise<{ value?: unknown; issues?: readonly unknown[] }>
     jsonSchema?: {
       input?: (options: { target: string }) => Record<string, unknown>
+      output?: (options: { target: string }) => Record<string, unknown>
     }
   }
 }
+type SchemaDirection = 'input' | 'output'
+type SchemaCapability = 'jsonSchema' | 'describe' | 'structural'
 type StoredRoute = {
   path: string
   method: string
   operation?: OpenAPIOperation
   handlers?: Handler[]
+}
+type SchemaCapabilityAdapter = {
+  name: string
+  capability: SchemaCapability
+  resolve: (
+    schema: StandardSchemaLike,
+    direction: SchemaDirection
+  ) => OpenAPISchema | null
 }
 type OpenAPIPluginTarget = {
   use: Application['use']
@@ -151,10 +168,15 @@ function normalizePath(path: string | undefined, fallback: string): string {
   return path.startsWith('/') ? path : `/${path}`
 }
 
+function isSchemaLikeValue(value: unknown): value is Record<string, unknown> {
+  return (
+    (typeof value === 'object' && value != null) || typeof value === 'function'
+  )
+}
+
 function isStandardSchemaLike(schema: unknown): schema is StandardSchemaLike {
   return (
-    schema != null &&
-    typeof schema === 'object' &&
+    isSchemaLikeValue(schema) &&
     typeof (schema as StandardSchemaLike)['~standard'] === 'object'
   )
 }
@@ -187,20 +209,57 @@ function getMappedJsonSchema(
 }
 
 function getStandardSchemaJsonSchema(
-  schema: StandardSchemaLike
+  schema: StandardSchemaLike,
+  direction: SchemaDirection
 ): Record<string, unknown> | null {
   const converter = schema['~standard']?.jsonSchema
-  if (!converter?.input) return null
+  const convert = converter?.[direction]
+  if (typeof convert !== 'function') return null
 
-  try {
-    return converter.input({ target: 'draft-2020-12' })
-  } catch {
+  for (const target of ['draft-2020-12', 'draft-07', 'openapi-3.0'] as const) {
     try {
-      return converter.input({ target: 'openapi-3.0' })
+      return convert({ target })
     } catch {
-      return null
+      continue
     }
   }
+
+  return null
+}
+
+function getSchemaMethodJsonSchema(
+  schema: unknown,
+  direction: SchemaDirection
+): Record<string, unknown> | null {
+  if (!isSchemaLikeValue(schema)) return null
+
+  const candidate =
+    direction === 'output' && typeof schema.toJSONSchema === 'function'
+      ? schema.toJSONSchema
+      : typeof schema.toJsonSchema === 'function'
+        ? schema.toJsonSchema
+        : typeof schema.toJSONSchema === 'function'
+          ? schema.toJSONSchema
+          : null
+
+  if (typeof candidate !== 'function') return null
+
+  for (const arg of [
+    { target: 'draft-2020-12' },
+    { target: 'draft-07' },
+    { target: 'openapi-3.0' },
+    undefined
+  ] as const) {
+    try {
+      const jsonSchema =
+        arg === undefined ? candidate.call(schema) : candidate.call(schema, arg)
+      if (isObjectRecord(jsonSchema)) return jsonSchema
+    } catch {
+      continue
+    }
+  }
+
+  return null
 }
 
 function withNullability(
@@ -220,84 +279,665 @@ function withNullability(
     : { ...schema, type: [schema.type, 'null'] }
 }
 
-export function schemaToOpenAPI(schema: unknown): OpenAPISchema {
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function inferOptionalityFromShape(schema: unknown): boolean {
+  if (!isObjectRecord(schema)) return false
+
+  if (schema.optional === true) return true
+  if (isObjectRecord(schema.spec) && schema.spec.optional === true) return true
+
+  switch (schema.type) {
+    case 'optional':
+    case 'exact_optional':
+    case 'undefinedable':
+    case 'nullish':
+      return true
+    case 'non_optional':
+    case 'non_nullable':
+    case 'non_nullish':
+      return false
+    default:
+      return false
+  }
+}
+
+function applyStructuralValidations(
+  schema: OpenAPISchema,
+  pipe: unknown
+): OpenAPISchema {
+  if (!Array.isArray(pipe)) return schema
+
+  const normalized = { ...schema }
+
+  for (const item of pipe) {
+    if (!isObjectRecord(item) || item.kind !== 'validation') continue
+
+    switch (item.type) {
+      case 'email':
+        normalized.format = 'email'
+        break
+      case 'url':
+        normalized.format = 'uri'
+        break
+      case 'uuid':
+        normalized.format = 'uuid'
+        break
+      case 'min_length':
+        if (typeof item.requirement === 'number') {
+          normalized.minLength = item.requirement
+        }
+        break
+      case 'max_length':
+        if (typeof item.requirement === 'number') {
+          normalized.maxLength = item.requirement
+        }
+        break
+      case 'regex':
+        if (item.requirement instanceof RegExp) {
+          normalized.pattern = item.requirement.source
+        }
+        break
+      case 'min_value':
+      case 'min_size':
+        if (typeof item.requirement === 'number') {
+          normalized.minimum = item.requirement
+        }
+        break
+      case 'max_value':
+      case 'max_size':
+        if (typeof item.requirement === 'number') {
+          normalized.maximum = item.requirement
+        }
+        break
+    }
+  }
+
+  return normalized
+}
+
+function applyDescribedValidations(
+  schema: OpenAPISchema,
+  tests: unknown
+): OpenAPISchema {
+  if (!Array.isArray(tests)) return schema
+
+  const normalized = { ...schema }
+
+  for (const test of tests) {
+    if (!isObjectRecord(test)) continue
+
+    const params = isObjectRecord(test.params)
+      ? test.params
+      : isObjectRecord(test.args)
+        ? test.args
+        : undefined
+    const name = typeof test.name === 'string' ? test.name : undefined
+
+    switch (name) {
+      case 'email':
+        normalized.format = 'email'
+        if (params?.regex instanceof RegExp) {
+          normalized.pattern = params.regex.source
+        }
+        break
+      case 'url':
+        normalized.format = 'uri'
+        if (params?.regex instanceof RegExp) {
+          normalized.pattern = params.regex.source
+        }
+        break
+      case 'uuid':
+        normalized.format = 'uuid'
+        if (params?.regex instanceof RegExp) {
+          normalized.pattern = params.regex.source
+        }
+        break
+      case 'integer':
+        normalized.type = 'integer'
+        break
+      case 'min':
+        if (typeof params?.min === 'number') {
+          if (normalized.type === 'string') normalized.minLength = params.min
+          else normalized.minimum = params.min
+        }
+        break
+      case 'max':
+        if (typeof params?.max === 'number') {
+          if (normalized.type === 'string') normalized.maxLength = params.max
+          else normalized.maximum = params.max
+        }
+        break
+      case 'length':
+        if (typeof params?.length === 'number') {
+          if (normalized.type === 'string') {
+            normalized.minLength = params.length
+            normalized.maxLength = params.length
+          }
+        }
+        break
+      case 'matches':
+        if (params?.regex instanceof RegExp) {
+          normalized.pattern = params.regex.source
+        }
+        break
+    }
+  }
+
+  return normalized
+}
+
+function isDescribedSchemaRecord(
+  value: unknown
+): value is Record<string, unknown> {
+  return (
+    isObjectRecord(value) &&
+    typeof value.type === 'string' &&
+    (Object.hasOwn(value, 'fields') ||
+      Object.hasOwn(value, 'keys') ||
+      Object.hasOwn(value, 'innerType') ||
+      Object.hasOwn(value, 'tests') ||
+      Object.hasOwn(value, 'rules') ||
+      Object.hasOwn(value, 'optional') ||
+      Object.hasOwn(value, 'nullable') ||
+      Object.hasOwn(value, 'oneOf') ||
+      Object.hasOwn(value, 'flags'))
+  )
+}
+
+function describedSchemaToOpenAPI(description: unknown): OpenAPISchema | null {
+  if (!isObjectRecord(description) || typeof description.type !== 'string') {
+    return null
+  }
+
+  let openapiSchema: OpenAPISchema | null
+
+  switch (description.type) {
+    case 'object': {
+      const entries = isObjectRecord(description.fields)
+        ? description.fields
+        : isObjectRecord(description.keys)
+          ? description.keys
+          : {}
+      const properties = Object.fromEntries(
+        Object.entries(entries).map(([key, value]) => [
+          key,
+          describedSchemaToOpenAPI(value) ?? {}
+        ])
+      )
+      const required = Object.entries(entries)
+        .filter(([, value]) => {
+          if (!isObjectRecord(value)) return true
+          if (value.optional === true) return false
+          if (
+            isObjectRecord(value.flags) &&
+            value.flags.presence === 'required'
+          ) {
+            return true
+          }
+          return value.optional !== true
+        })
+        .map(([key]) => key)
+
+      openapiSchema = {
+        type: 'object',
+        properties,
+        ...(required.length > 0 ? { required } : {})
+      }
+      break
+    }
+    case 'array':
+      openapiSchema = {
+        type: 'array',
+        items:
+          describedSchemaToOpenAPI(
+            description.innerType ??
+              (Array.isArray(description.items)
+                ? description.items[0]
+                : undefined)
+          ) ?? {}
+      }
+      break
+    case 'tuple':
+      openapiSchema = {
+        type: 'array',
+        prefixItems: Array.isArray(description.innerType)
+          ? description.innerType
+              .map((item) => describedSchemaToOpenAPI(item))
+              .filter((item): item is OpenAPISchema => item != null)
+          : []
+      }
+      break
+    case 'string':
+      openapiSchema = { type: 'string' }
+      break
+    case 'number':
+      openapiSchema = { type: 'number' }
+      break
+    case 'boolean':
+      openapiSchema = { type: 'boolean' }
+      break
+    case 'date':
+      openapiSchema = { type: 'string', format: 'date-time' }
+      break
+    default:
+      openapiSchema = null
+  }
+
+  if (!openapiSchema) return null
+
+  if (Array.isArray(description.oneOf) && description.oneOf.length > 0) {
+    openapiSchema.enum = [...description.oneOf]
+  }
+
+  if ('default' in description && description.default !== undefined) {
+    openapiSchema.default = description.default
+  }
+
+  openapiSchema = applyDescribedValidations(openapiSchema, description.tests)
+  openapiSchema = applyDescribedValidations(openapiSchema, description.rules)
+
+  return withNullability(openapiSchema, description.nullable === true)
+}
+
+function getDescribedSchema(schema: unknown): Record<string, unknown> | null {
+  if (!isSchemaLikeValue(schema) || typeof schema.describe !== 'function') {
+    return null
+  }
+
+  try {
+    const description = schema.describe()
+    return isDescribedSchemaRecord(description) ? description : null
+  } catch {
+    return null
+  }
+}
+
+function structuralSchemaToOpenAPI(schema: unknown): OpenAPISchema | null {
+  if (!isSchemaLikeValue(schema)) return null
+
+  if (
+    !('type' in schema) &&
+    (isObjectRecord(schema.props) || isObjectRecord(schema.propsInfo))
+  ) {
+    const propertiesSource = isObjectRecord(schema.props)
+      ? schema.props
+      : Object.fromEntries(
+          Object.entries(schema.propsInfo as Record<string, unknown>).map(
+            ([key, value]) => [
+              key,
+              isObjectRecord(value) && 'type' in value ? value.type : value
+            ]
+          )
+        )
+    const required = isObjectRecord(schema.propsInfo)
+      ? Object.entries(schema.propsInfo)
+          .filter(
+            ([, value]) => !isObjectRecord(value) || value.optional !== true
+          )
+          .map(([key]) => key)
+      : Object.keys(propertiesSource)
+
+    return {
+      type: 'object',
+      properties: Object.fromEntries(
+        Object.entries(propertiesSource).map(([key, value]) => [
+          key,
+          structuralSchemaToOpenAPI(value) ?? {}
+        ])
+      ),
+      ...(required.length > 0 ? { required } : {})
+    }
+  }
+
+  if (!('type' in schema) && typeof schema.basicType === 'string') {
+    switch (schema.basicType) {
+      case 'string':
+        return { type: 'string' }
+      case 'number':
+        return { type: 'number' }
+      case 'boolean':
+        return { type: 'boolean' }
+      default:
+        return null
+    }
+  }
+
+  if (
+    isObjectRecord(schema.schema) &&
+    typeof schema.schema.type === 'string' &&
+    String(schema.schema.type).startsWith('__!quartet/')
+  ) {
+    return structuralSchemaToOpenAPI(schema.schema)
+  }
+
+  if (schema.type === 'lazy' && typeof schema.getter === 'function') {
+    try {
+      return structuralSchemaToOpenAPI(schema.getter())
+    } catch {
+      return null
+    }
+  }
+
+  if (
+    (schema.type === 'optional' ||
+      schema.type === 'exact_optional' ||
+      schema.type === 'undefinedable' ||
+      schema.type === 'nullish') &&
+    'wrapped' in schema
+  ) {
+    const wrapped = structuralSchemaToOpenAPI(schema.wrapped)
+    if (!wrapped) return null
+
+    return schema.type === 'nullish' ? withNullability(wrapped, true) : wrapped
+  }
+
+  if (
+    (schema.type === 'nullable' ||
+      schema.type === 'non_optional' ||
+      schema.type === 'non_nullable' ||
+      schema.type === 'non_nullish') &&
+    'wrapped' in schema
+  ) {
+    const wrapped = structuralSchemaToOpenAPI(schema.wrapped)
+    if (!wrapped) return null
+
+    if (schema.type === 'nullable') return withNullability(wrapped, true)
+    return wrapped
+  }
+
+  let openapiSchema: OpenAPISchema
+
+  switch (schema.type) {
+    case 'string':
+      openapiSchema = { type: 'string' }
+      break
+    case 'number':
+      openapiSchema = { type: 'number' }
+      break
+    case 'integer':
+      openapiSchema = { type: 'integer' }
+      break
+    case 'boolean':
+      openapiSchema = { type: 'boolean' }
+      break
+    case 'bigint':
+      openapiSchema = { type: 'integer' }
+      break
+    case 'date':
+      openapiSchema = { type: 'string', format: 'date-time' }
+      break
+    case 'array':
+      openapiSchema = {
+        type: 'array',
+        items:
+          structuralSchemaToOpenAPI(
+            schema.item ??
+              schema.innerType ??
+              (Array.isArray(schema.schemas) ? schema.schemas[0] : undefined)
+          ) ?? {}
+      }
+      break
+    case 'object':
+    case 'strict_object':
+    case 'loose_object':
+    case 'object_with_rest': {
+      const entries = isObjectRecord(schema.entries)
+        ? schema.entries
+        : isObjectRecord(schema.fields)
+          ? schema.fields
+          : isObjectRecord(schema._object)
+            ? schema._object
+            : isObjectRecord(schema.props)
+              ? schema.props
+              : isObjectRecord(schema.propsSchemas)
+                ? schema.propsSchemas
+                : isObjectRecord(schema.to) &&
+                    isObjectRecord(schema.to.properties)
+                  ? schema.to.properties
+                  : null
+      if (!entries) return null
+
+      const properties = Object.fromEntries(
+        Object.entries(entries).map(([key, value]) => [
+          key,
+          structuralSchemaToOpenAPI(value) ?? {}
+        ])
+      )
+      const required = Object.entries(entries)
+        .filter(([, value]) => !inferOptionalityFromShape(value))
+        .map(([key]) => key)
+
+      openapiSchema = {
+        type: 'object',
+        properties,
+        ...(required.length > 0 ? { required } : {})
+      }
+      break
+    }
+    case 'literal':
+      openapiSchema = { enum: [schema.literal] }
+      break
+    case '__!quartet/Object!__': {
+      const propsSchemas = isObjectRecord(schema.propsSchemas)
+        ? schema.propsSchemas
+        : null
+      if (!propsSchemas) return null
+
+      const properties = Object.fromEntries(
+        Object.entries(propsSchemas).map(([key, value]) => [
+          key,
+          structuralSchemaToOpenAPI(value) ?? {}
+        ])
+      )
+
+      openapiSchema = {
+        type: 'object',
+        properties,
+        required: Object.keys(propsSchemas)
+      }
+      break
+    }
+    case '__!quartet/String!__':
+      openapiSchema = { type: 'string' }
+      break
+    case '__!quartet/Number!__':
+      openapiSchema = { type: 'number' }
+      break
+    case '__!quartet/Boolean!__':
+      openapiSchema = { type: 'boolean' }
+      break
+    case '__!quartet/And!__': {
+      const oneOf = Array.isArray(schema.schemas)
+        ? schema.schemas
+            .map((item) => structuralSchemaToOpenAPI(item))
+            .filter((item): item is OpenAPISchema => item != null)
+        : []
+      openapiSchema = oneOf.length === 1 ? oneOf[0] : { allOf: oneOf }
+      break
+    }
+    case '__!quartet/Test!__':
+      openapiSchema = {}
+      break
+    case 'picklist':
+      openapiSchema = Array.isArray(schema.options)
+        ? { enum: [...schema.options] }
+        : {}
+      break
+    case 'enum':
+      openapiSchema = isObjectRecord(schema.enum)
+        ? { enum: Object.values(schema.enum) }
+        : {}
+      break
+    case 'union':
+    case 'variant':
+      openapiSchema = {
+        oneOf: Array.isArray(schema.options)
+          ? schema.options
+              .map((option) => structuralSchemaToOpenAPI(option))
+              .filter((option): option is OpenAPISchema => option != null)
+          : []
+      }
+      break
+    case 'tuple':
+      openapiSchema = {
+        type: 'array',
+        prefixItems: Array.isArray(schema.items)
+          ? schema.items
+              .map((item) => structuralSchemaToOpenAPI(item))
+              .filter((item): item is OpenAPISchema => item != null)
+          : []
+      }
+      break
+    default:
+      return null
+  }
+
+  return applyStructuralValidations(openapiSchema, schema.pipe)
+}
+
+const schemaCapabilityAdapters: SchemaCapabilityAdapter[] = [
+  {
+    name: 'standard-json-schema',
+    capability: 'jsonSchema',
+    resolve(schema, direction) {
+      const jsonSchema = getStandardSchemaJsonSchema(schema, direction)
+      return jsonSchema ? jsonSchemaToOpenAPI(jsonSchema) : null
+    }
+  },
+  {
+    name: 'mapped-json-schema',
+    capability: 'jsonSchema',
+    resolve(schema) {
+      const jsonSchema = getMappedJsonSchema(schema)
+      return jsonSchema ? jsonSchemaToOpenAPI(jsonSchema) : null
+    }
+  },
+  {
+    name: 'describe-adapter',
+    capability: 'describe',
+    resolve(schema) {
+      const description = getDescribedSchema(schema)
+      return description ? describedSchemaToOpenAPI(description) : null
+    }
+  },
+  {
+    name: 'structural-adapter',
+    capability: 'structural',
+    resolve(schema) {
+      return structuralSchemaToOpenAPI(schema)
+    }
+  },
+  {
+    name: 'schema-method-json-schema',
+    capability: 'jsonSchema',
+    resolve(schema, direction) {
+      const jsonSchema = getSchemaMethodJsonSchema(schema, direction)
+      return jsonSchema ? jsonSchemaToOpenAPI(jsonSchema) : null
+    }
+  }
+]
+
+export function schemaToOpenAPI(
+  schema: unknown,
+  direction: SchemaDirection = 'input'
+): OpenAPISchema {
   if (typeof schema === 'string') {
     return modelRegistry.has(schema)
       ? cloneSchema(modelRegistry.get(schema) as OpenAPISchema)
       : { type: 'string' }
   }
 
-  if (!schema || typeof schema !== 'object') {
+  if (!schema || (typeof schema !== 'object' && typeof schema !== 'function')) {
     return { type: 'object' }
   }
 
   if (isStandardSchemaLike(schema)) {
-    const standardJsonSchema = getStandardSchemaJsonSchema(schema)
-    if (standardJsonSchema) return jsonSchemaToOpenAPI(standardJsonSchema)
+    for (const adapter of schemaCapabilityAdapters) {
+      const openapiSchema = adapter.resolve(schema, direction)
+      if (openapiSchema) return openapiSchema
+    }
 
-    const mappedJsonSchema = getMappedJsonSchema(schema)
-    if (mappedJsonSchema) return jsonSchemaToOpenAPI(mappedJsonSchema)
+    return {}
   }
 
   return jsonSchemaToOpenAPI(schema as Record<string, unknown>)
 }
 
 function jsonSchemaToOpenAPI(schema: Record<string, unknown>): OpenAPISchema {
-  if (schema.type === 'object') {
-    const rawProperties = schema.properties as
-      | Record<string, Record<string, unknown>>
-      | undefined
-    const properties: Record<string, OpenAPISchema> = {}
+  const normalized: Record<string, unknown> = {}
 
-    for (const [key, value] of Object.entries(rawProperties ?? {})) {
-      properties[key] = jsonSchemaToOpenAPI(value)
+  for (const [key, value] of Object.entries(schema)) {
+    if (value === undefined) continue
+
+    if (key === 'properties' || key === 'patternProperties') {
+      normalized[key] = Object.fromEntries(
+        Object.entries(value as Record<string, Record<string, unknown>>).map(
+          ([propertyName, propertySchema]) => [
+            propertyName,
+            jsonSchemaToOpenAPI(propertySchema)
+          ]
+        )
+      )
+      continue
     }
 
-    return {
-      type: 'object',
-      properties,
-      ...(Array.isArray(schema.required)
-        ? { required: schema.required as string[] }
-        : {})
+    if (
+      key === '$defs' ||
+      key === 'definitions' ||
+      key === 'dependentSchemas'
+    ) {
+      normalized[key] = Object.fromEntries(
+        Object.entries(value as Record<string, Record<string, unknown>>).map(
+          ([schemaName, nestedSchema]) => [
+            schemaName,
+            jsonSchemaToOpenAPI(nestedSchema)
+          ]
+        )
+      )
+      continue
     }
+
+    if (
+      key === 'items' ||
+      key === 'not' ||
+      key === 'contains' ||
+      key === 'if' ||
+      key === 'then' ||
+      key === 'else' ||
+      key === 'propertyNames' ||
+      key === 'additionalProperties' ||
+      key === 'unevaluatedProperties'
+    ) {
+      normalized[key] =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? jsonSchemaToOpenAPI(value as Record<string, unknown>)
+          : value
+      continue
+    }
+
+    if (
+      key === 'allOf' ||
+      key === 'anyOf' ||
+      key === 'oneOf' ||
+      key === 'prefixItems'
+    ) {
+      normalized[key] = Array.isArray(value)
+        ? value.map((item) =>
+            item && typeof item === 'object' && !Array.isArray(item)
+              ? jsonSchemaToOpenAPI(item as Record<string, unknown>)
+              : item
+          )
+        : value
+      continue
+    }
+
+    normalized[key] = value
   }
 
-  if (schema.type === 'array') {
-    return {
-      type: 'array',
-      items: schema.items
-        ? jsonSchemaToOpenAPI(schema.items as Record<string, unknown>)
-        : { type: 'object' }
-    }
-  }
-
-  return withNullability(
-    {
-      ...(typeof schema.$ref === 'string' ? { $ref: schema.$ref } : {}),
-      ...(typeof schema.type === 'string' || Array.isArray(schema.type)
-        ? { type: schema.type as string | string[] }
-        : {}),
-      ...(typeof schema.format === 'string' ? { format: schema.format } : {}),
-      ...(typeof schema.minimum === 'number'
-        ? { minimum: schema.minimum }
-        : {}),
-      ...(typeof schema.maximum === 'number'
-        ? { maximum: schema.maximum }
-        : {}),
-      ...(typeof schema.minLength === 'number'
-        ? { minLength: schema.minLength }
-        : {}),
-      ...(typeof schema.maxLength === 'number'
-        ? { maxLength: schema.maxLength }
-        : {}),
-      ...(typeof schema.pattern === 'string'
-        ? { pattern: schema.pattern }
-        : {}),
-      ...(Array.isArray(schema.enum) ? { enum: schema.enum } : {}),
-      ...(schema.default !== undefined ? { default: schema.default } : {})
-    },
-    schema.nullable === true
-  )
+  return withNullability(normalized as OpenAPISchema, schema.nullable === true)
 }
 
 function buildParameters(
@@ -319,7 +959,7 @@ export async function createOpenAPIOperationFragment(
   source: RequestSource,
   schema: unknown
 ): Promise<OperationFragment> {
-  const openapiSchema = schemaToOpenAPI(schema)
+  const openapiSchema = schemaToOpenAPI(schema, 'input')
 
   if (source === 'body') {
     return {
@@ -361,7 +1001,7 @@ function normalizeHeader(
 ): OpenAPIHeader {
   if (input && typeof input === 'object' && 'schema' in input) {
     return {
-      schema: schemaToOpenAPI((input as { schema: unknown }).schema),
+      schema: schemaToOpenAPI((input as { schema: unknown }).schema, 'output'),
       ...(typeof (input as { description?: unknown }).description === 'string'
         ? { description: (input as { description?: string }).description }
         : {})
@@ -369,7 +1009,7 @@ function normalizeHeader(
   }
 
   return {
-    schema: schemaToOpenAPI(input)
+    schema: schemaToOpenAPI(input, 'output')
   }
 }
 
@@ -380,7 +1020,7 @@ function normalizeResponse(
     ? Object.fromEntries(
         Object.entries(response.content).map(([contentType, entry]) => [
           contentType,
-          { schema: schemaToOpenAPI(entry.schema) }
+          { schema: schemaToOpenAPI(entry.schema, 'output') }
         ])
       )
     : undefined
@@ -403,7 +1043,7 @@ function normalizeResponse(
       content: {
         ...(normalizedContent ?? {}),
         [contentType]: {
-          schema: schemaToOpenAPI(response.schema)
+          schema: schemaToOpenAPI(response.schema, 'output')
         }
       }
     }
@@ -541,7 +1181,7 @@ export function describeOperation(operation: DescribeOperationInput): Handler {
 
 export function model(models: Record<string, unknown>): Handler {
   for (const [name, schema] of Object.entries(models)) {
-    modelRegistry.set(name, schemaToOpenAPI(schema))
+    modelRegistry.set(name, schemaToOpenAPI(schema, 'output'))
   }
 
   return async ({ next }) => next()
@@ -588,12 +1228,14 @@ async function extractHandlerOperation(
   handler: Handler
 ): Promise<OperationFragment> {
   const metadata = handler as unknown as Record<symbol, unknown>
-  const operation = (await metadata[operationMetadataKey]) as
-    | OpenAPIOperation
-    | undefined
-  const fragment = (await metadata[fragmentMetadataKey]) as
-    | OperationFragment
-    | undefined
+  const operationValue = metadata[operationMetadataKey]
+  const fragmentValue = metadata[fragmentMetadataKey]
+  const operation = (await (typeof operationValue === 'function'
+    ? operationValue()
+    : operationValue)) as OpenAPIOperation | undefined
+  const fragment = (await (typeof fragmentValue === 'function'
+    ? fragmentValue()
+    : fragmentValue)) as OperationFragment | undefined
 
   if (operation && fragment) {
     return mergeOperation(operation, fragment)
@@ -660,7 +1302,7 @@ export async function getOpenAPIDocument(): Promise<OpenAPIDocument> {
     $schema: 'https://spec.openapis.org/oas/3.1/schema-base/2025-09-15',
     openapi: '3.1.1',
     info: {
-      title: currentOptions.documentation?.info?.title ?? 'API',
+      title: currentOptions.documentation?.info?.title ?? 'API Reference',
       version: currentOptions.documentation?.info?.version ?? '1.0.0',
       ...(currentOptions.documentation?.info?.description
         ? { description: currentOptions.documentation.info.description }

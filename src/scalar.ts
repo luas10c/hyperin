@@ -106,14 +106,6 @@ function normalizePath(path: string | undefined, fallback: string): string {
   return path.startsWith('/') ? path : `/${path}`
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
 function serializeScriptValue(value: unknown): string {
   return JSON.stringify(value)
     .replace(/</g, '\\u003c')
@@ -123,8 +115,9 @@ function serializeScriptValue(value: unknown): string {
 
 function createScalarDocument(options?: ScalarOptions): string {
   const openapiUrl = options?.url ?? '/openapi.json'
-  const defaultDescription = escapeHtml('API Reference')
   const slug = getOpenAPISlug(openapiUrl)
+  const defaultTitle = 'API Reference'
+  const defaultDescription = ''
   const configuration = serializeScriptValue({
     ...(options?.configuration ?? {}),
     url: openapiUrl,
@@ -143,7 +136,7 @@ function createScalarDocument(options?: ScalarOptions): string {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="${defaultDescription}" />
-    <title>API Reference</title>
+    <title>${defaultTitle}</title>
   </head>
   <body>
     <div id="app"></div>
@@ -154,22 +147,37 @@ function createScalarDocument(options?: ScalarOptions): string {
         .then((response) => response.ok ? response.json() : null)
         .then((documentSpec) => {
           const descriptionElement = document.querySelector('meta[name="description"]')
-
-          if (typeof documentSpec?.info?.title === 'string' && documentSpec.info.title !== '') {
-            document.title = documentSpec.info.title
-          }
-
-          if (
-            descriptionElement &&
+          const title =
+            typeof documentSpec?.info?.title === 'string' &&
+            documentSpec.info.title !== ''
+              ? documentSpec.info.title
+              : ${serializeScriptValue(defaultTitle)}
+          const description =
             typeof documentSpec?.info?.description === 'string' &&
             documentSpec.info.description !== ''
-          ) {
-            descriptionElement.setAttribute('content', documentSpec.info.description)
+              ? documentSpec.info.description
+              : ${serializeScriptValue(defaultDescription)}
+
+          document.title = title
+
+          if (descriptionElement) {
+            descriptionElement.setAttribute('content', description)
           }
 
           Scalar.createApiReference('#app', ${configuration})
         })
         .catch(() => {
+          const descriptionElement = document.querySelector('meta[name="description"]')
+
+          document.title = ${serializeScriptValue(defaultTitle)}
+
+          if (descriptionElement) {
+            descriptionElement.setAttribute(
+              'content',
+              ${serializeScriptValue(defaultDescription)}
+            )
+          }
+
           Scalar.createApiReference('#app', ${configuration})
         })
     </script>
