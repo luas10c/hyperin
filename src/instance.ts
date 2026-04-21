@@ -60,7 +60,7 @@ export interface ShutdownOptions {
   signals?: NodeJS.Signals[]
 }
 
-export type AppSetting = 'x-powered-by'
+export type AppSetting = 'x-powered-by' | 'trust proxy'
 
 // RouteChain
 // ─────────────────────────────────────────────────────────────
@@ -436,6 +436,9 @@ class Hyperin {
   // Signal handlers registered by graceful(), kept for cleanup.
   #signalHandlers: Array<{ signal: NodeJS.Signals; handler: () => void }> = []
   #xPoweredByEnabled = true
+  // If true, trust X-Forwarded-* headers from reverse proxies
+  #trustProxyEnabled = false
+  // Note: deprecate separate control for X-Forwarded-For. Trust Proxy governs behavior.
 
   constructor(opts: RouterOptions = {}) {
     this.#prefix = opts.prefix || ''
@@ -597,7 +600,19 @@ class Hyperin {
     if (setting === 'x-powered-by') {
       this.#xPoweredByEnabled = false
     }
+    if (setting === 'trust proxy') {
+      this.#trustProxyEnabled = false
+    }
+    return this
+  }
 
+  enable(setting: AppSetting): this {
+    if (setting === 'x-powered-by') {
+      this.#xPoweredByEnabled = true
+    }
+    if (setting === 'trust proxy') {
+      this.#trustProxyEnabled = true
+    }
     return this
   }
 
@@ -674,6 +689,9 @@ class Hyperin {
 
     const request = rawRequest as Request
     const response = rawResponse as Response
+
+    // Expose app-level proxy trust settings to the request instance
+    request.locals.trustProxyEnabled = this.#trustProxyEnabled
 
     if (this.#xPoweredByEnabled && !response.hasHeader('X-Powered-By')) {
       response.setHeader('X-Powered-By', 'Hyperin')

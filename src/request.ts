@@ -155,11 +155,15 @@ export class Request<
   }
 
   get ipAddress(): string {
-    const forwarded = this.headers['x-forwarded-for']
-    if (forwarded) {
-      return (Array.isArray(forwarded) ? forwarded[0] : forwarded)
-        .split(',')[0]
-        .trim()
+    const locals = this.locals as unknown as { trustProxyEnabled?: boolean }
+    const trustProxyEnabled = locals?.trustProxyEnabled ?? false
+    if (trustProxyEnabled) {
+      const forwarded = this.headers['x-forwarded-for']
+      if (forwarded) {
+        return (Array.isArray(forwarded) ? forwarded[0] : forwarded)
+          .split(',')[0]
+          .trim()
+      }
     }
     return this.socket?.remoteAddress || ''
   }

@@ -36,6 +36,7 @@ const DEFAULT_HSTS: Required<HstsOptions> = {
 }
 
 function isSecureRequest(request: Request): boolean {
+  // Check X-Forwarded-Proto first (regardless of trust proxy flag) to preserve backward-compatible behavior
   const forwardedProto = request.headers['x-forwarded-proto']
   const protocol = Array.isArray(forwardedProto)
     ? forwardedProto[0]
@@ -45,7 +46,12 @@ function isSecureRequest(request: Request): boolean {
     return protocol.split(',')[0].trim().toLowerCase() === 'https'
   }
 
-  return 'encrypted' in request.socket && Boolean(request.socket.encrypted)
+  // Avoid using 'any' in types: inspect TLS status safely
+  const sock = request.socket as unknown as { encrypted?: boolean }
+  if (typeof sock?.encrypted === 'boolean') {
+    return sock.encrypted
+  }
+  return false
 }
 
 function setHeaderIfAbsent(
