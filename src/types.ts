@@ -31,6 +31,15 @@ export type RequestRefinement = {
   query?: Record<string, unknown>
 }
 
+export interface StandardSchemaV1Issue {
+  readonly message: string
+  readonly path?: readonly (PropertyKey | { readonly key: PropertyKey })[]
+}
+
+export interface StandardSchemaV1Options {
+  readonly libraryOptions?: Record<string, unknown>
+}
+
 export interface StandardSchemaV1Types<TInput = unknown, TOutput = TInput> {
   readonly input: TInput
   readonly output: TOutput
@@ -38,7 +47,7 @@ export interface StandardSchemaV1Types<TInput = unknown, TOutput = TInput> {
 
 export interface StandardSchemaV1Result<TOutput = unknown> {
   readonly value?: TOutput
-  readonly issues?: readonly unknown[]
+  readonly issues?: readonly StandardSchemaV1Issue[]
 }
 
 export interface StandardSchemaV1<TInput = unknown, TOutput = TInput> {
@@ -47,31 +56,58 @@ export interface StandardSchemaV1<TInput = unknown, TOutput = TInput> {
     readonly vendor?: string
     readonly validate: (
       value: unknown,
-      options?: unknown
+      options?: StandardSchemaV1Options | undefined
     ) =>
       | StandardSchemaV1Result<TOutput>
       | Promise<StandardSchemaV1Result<TOutput>>
     readonly types?: StandardSchemaV1Types<TInput, TOutput>
     readonly jsonSchema?: {
-      readonly input?: (options: { target: string }) => Record<string, unknown>
+      readonly input?: (options: {
+        target: string
+        libraryOptions?: Record<string, unknown>
+      }) => Record<string, unknown>
+      readonly output?: (options: {
+        target: string
+        libraryOptions?: Record<string, unknown>
+      }) => Record<string, unknown>
     }
   }
 }
 
-type InferZodLikeSchema<TSchema> = TSchema extends {
-  safeParse: (input: unknown) => infer TResult
-}
-  ? Extract<TResult, { success: true }> extends { data: infer TData }
-    ? TData
-    : unknown
-  : never
+type AwaitedSchemaResult<TValue> =
+  TValue extends PromiseLike<infer TResolved>
+    ? AwaitedSchemaResult<TResolved>
+    : TValue
 
-export type InferSchemaOutput<TSchema> =
-  TSchema extends StandardSchemaV1<unknown, infer TOutput>
+type InferValidatedValue<TValue> =
+  Extract<
+    AwaitedSchemaResult<TValue>,
+    { readonly value: unknown } | { value: unknown }
+  > extends { readonly value: infer TOutput }
     ? TOutput
-    : InferZodLikeSchema<TSchema> extends never
-      ? unknown
-      : InferZodLikeSchema<TSchema>
+    : Extract<AwaitedSchemaResult<TValue>, { value: unknown }> extends {
+          value: infer TOutput
+        }
+      ? TOutput
+      : unknown
+
+export type InferSchemaOutput<TSchema> = TSchema extends {
+  readonly '~types'?: { readonly output: infer TOutput }
+}
+  ? TOutput
+  : TSchema extends {
+        readonly '~standard': {
+          readonly types?: { readonly output: infer TOutput }
+        }
+      }
+    ? TOutput
+    : TSchema extends {
+          readonly '~standard': {
+            readonly validate: (...args: unknown[]) => infer TResult
+          }
+        }
+      ? InferValidatedValue<TResult>
+      : unknown
 
 export interface RouteSchemaOptions {
   body?: unknown
@@ -85,10 +121,11 @@ export interface RouteSchemaOptions {
   responses?: Record<string | number, unknown>
 }
 
-export type TypedMiddleware<
+export interface TypedMiddleware<
   TRequest extends Request = Request,
   TRefinement extends RequestRefinement = Record<never, never>
-> = ((ctx: HandlerContext<TRequest>) => HandlerReturn) & {
+> {
+  (ctx: HandlerContext<TRequest>): HandlerReturn
   readonly __validate__?: TRefinement
 }
 
@@ -125,6 +162,16 @@ export type HandlerChain<
     ? [TFirst, ...HandlerChain<ApplyMiddleware<TRequest, TFirst>, TRest>]
     : never
   : []
+
+type NonEmptyHandlerChain<
+  TRequest extends Request,
+  THandlers extends unknown[]
+> =
+  HandlerChain<TRequest, THandlers> extends infer TChain extends unknown[]
+    ? TChain extends []
+      ? never
+      : TChain
+    : never
 
 type ParamName<TSegment extends string> =
   TSegment extends `${infer TName}/${string}`
@@ -174,3 +221,31 @@ export type ApplyRouteOptions<
       : TRequest['query']
     : TRequest['query']
 >
+
+export type RouteHandlerArgs<
+  TPath extends string,
+  THandlers extends unknown[]
+> = NonEmptyHandlerChain<RouteRequest<TPath>, THandlers>
+
+export type RouteHandlerArgsWithOptions<
+  TPath extends string,
+  TOptions extends RouteSchemaOptions,
+  THandlers extends unknown[]
+> = [
+  ...NonEmptyHandlerChain<
+    ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
+    THandlers
+  >,
+  TOptions & RouteSchemaOptions
+]
+
+export type RouteMethodArgsWithOptions<
+  TPath extends string,
+  TArgs extends [Handler, ...unknown[], RouteSchemaOptions]
+> = TArgs extends [...infer THandlers, infer TOptions]
+  ? TOptions extends RouteSchemaOptions
+    ? THandlers extends [unknown, ...unknown[]]
+      ? RouteHandlerArgsWithOptions<TPath, TOptions, THandlers>
+      : never
+    : never
+  : never
