@@ -14,12 +14,12 @@ type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
 
 export interface CorsOptions {
   /**
-   * string     → origin fixo, ex: 'http://example.com'
-   * string[]   → lista de origens permitidas
-   * RegExp     → testa a origem
-   * true       → reflete a origem da requisição (equivale a '*' com credenciais)
-   * false      → desabilita CORS completamente
-   * function   → callback(origin, cb) assíncrono, igual ao express/cors
+   * string     → fixed origin, e.g., 'http://example.com'
+   * string[]   → list of allowed origins
+   * RegExp     → tests the origin
+   * true       → reflect the origin of the request (equivalent to '*' with credentials)
+   * false      → disable CORS completely
+   * function   → asynchronous callback(origin, cb), same as express/cors
    */
   origin?:
     | string
@@ -51,12 +51,12 @@ const DEFAULT_CORS: Required<CorsOptions> = {
   optionsSuccessStatus: 204
 }
 
-// Normaliza string|string[] para string
+// Normalize string|string[] to string
 function toHeaderValue(v: string | string[]): string {
   return Array.isArray(v) ? v.join(', ') : v
 }
 
-// Resolve a origem — retorna a string a usar ou false para bloquear
+// Resolve the origin — returns the string to use or false to block
 function resolveOrigin(
   origin: CorsOptions['origin'],
   reqOrigin: string | undefined
@@ -70,7 +70,7 @@ function resolveOrigin(
       return resolve(false)
     }
 
-    // true → reflete a origem do request (ou '*' se não vier origem)
+    // true -> reflect the origin of the request (or '*' if none provided)
     if (origin === true) {
       return resolve(reqOrigin || '*')
     }
@@ -125,14 +125,14 @@ export function cors(options: CorsOptions = {}): Middleware {
     // ── Preflight (OPTIONS) ────────────────────────────────────
     if (request.method === 'OPTIONS') {
       if (allowOrigin === false) {
-        // origem não permitida — deixa passar para o próximo handler
+      // origin not allowed — pass to the next handler
         if (cfg.preflightContinue) return void (await next())
         return void response.status(cfg.optionsSuccessStatus).send()
       }
 
       response.header('Access-Control-Allow-Origin', allowOrigin)
 
-      // Vary: Origin sempre que não for '*'
+      // Vary: Origin whenever not '*'
       if (allowOrigin !== '*') {
         response.header('Vary', 'Origin')
       }
@@ -143,7 +143,7 @@ export function cors(options: CorsOptions = {}): Middleware {
 
       response.header('Access-Control-Allow-Methods', methods)
 
-      // allowedHeaders: usa o que veio no request se não foi configurado
+      // allowedHeaders: uses the request headers if not configured
       const allowedHeaders = cfg.allowedHeaders
         ? toHeaderValue(cfg.allowedHeaders)
         : (request.headers['access-control-request-headers'] as
@@ -175,9 +175,9 @@ export function cors(options: CorsOptions = {}): Middleware {
       return void response.status(cfg.optionsSuccessStatus).send()
     }
 
-    // ── Requisição normal ──────────────────────────────────────
+    // ── Normal request ───────────────────────────────────────
     if (allowOrigin === false) {
-      return void (await next()) // não bloqueia — só não seta os headers
+      return void (await next()) // does not block — only avoids setting headers
     }
 
     response.header('Access-Control-Allow-Origin', allowOrigin)

@@ -90,8 +90,8 @@ export async function parseMultipart(
   let fileCount = 0
   let fieldCount = 0
 
-  // Coleta o body inteiro em um Buffer
-  // (para streams grandes, considere um parser incremental como busboy)
+  // Collect the entire body into a Buffer
+  // (for large streams, consider using an incremental parser like busboy)
   const body = await new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = []
     request.on('data', (chunk: Buffer) => {
@@ -105,17 +105,17 @@ export async function parseMultipart(
   const parts = splitBuffer(body, delimiter)
 
   for (const part of parts) {
-    // Ignora o epílogo (último "--")
+  // Ignore the epilogue (last "--")
     if (part.equals(Buffer.from('--\r\n')) || part.equals(Buffer.from('--'))) {
       continue
     }
 
-    // Remove o CRLF inicial de cada parte
+  // Remove the initial CRLF from each part
     const partContent = part.subarray(0, 2).equals(Buffer.from(CRLF))
       ? part.subarray(2)
       : part
 
-    // Separa headers do corpo da parte
+  // Split headers from the body of the part
     const separatorIndex = indexOfDoubleNewline(partContent)
     if (separatorIndex === -1) continue
 
@@ -123,9 +123,9 @@ export async function parseMultipart(
       .subarray(0, separatorIndex)
       .toString('utf8')
 
-    // +4 para pular o \r\n\r\n
+  // +4 to skip the \r\n\r\n
     const bodyBuffer = partContent.subarray(separatorIndex + 4)
-    // Remove o CRLF final do corpo
+  // Remove the trailing CRLF from the body
     const bodyContent = partContent
       .subarray(partContent.length - 2)
       .equals(Buffer.from(CRLF))
@@ -140,7 +140,7 @@ export async function parseMultipart(
     if (!fieldname) continue
 
     if (filename !== null) {
-      // É um arquivo
+      // It's a file
       if (limits.files !== undefined && fileCount >= limits.files) {
         throw new Error(`Too many files (limit: ${limits.files})`)
       }
@@ -165,13 +165,13 @@ export async function parseMultipart(
       }
 
       if (onFile) {
-        // Cria uma stream legível a partir do buffer e entrega ao handler
+      // Create a readable stream from the buffer and pass it to the handler
         const stream = Readable.from(bodyContent)
         files[fieldname] = await onFile(stream, info)
       }
-      // Se não há onFile, o arquivo é simplesmente descartado
+      // If there is no onFile, the file is simply discarded
     } else {
-      // É um campo de texto
+      // It's a text field
       if (limits.fields !== undefined && fieldCount >= limits.fields) {
         throw new Error(`Too many fields (limit: ${limits.fields})`)
       }
@@ -233,11 +233,11 @@ export function pipeFile(
     }
   }
 
-  // ── Conditional request: If-Modified-Since ─────────────────
+  //  ── Conditional request: If-Modified-Since ─────────────────
   const ifModifiedSince = request.headers['if-modified-since']
   if (ifModifiedSince) {
     const since = new Date(ifModifiedSince).getTime()
-    // Trunca para segundos — mesma precisão que o header HTTP
+  // Truncate to seconds — same precision as the HTTP header
     if (
       !isNaN(since) &&
       Math.floor((stat!.mtimeMs as number) / 1000) <= Math.floor(since / 1000)
@@ -436,7 +436,7 @@ function parseHeaders(raw: string): Record<string, string> {
 function extractParam(header: string, param: string): string | null {
   const regex = new RegExp(`${param}="([^"]*)"`, 'i')
   const match = header.match(regex)
-  // filename pode existir sem aspas
+  // filename may exist without quotes
   if (!match && param === 'filename') {
     const bare = header.match(/filename=([^;]+)/i)
     return bare ? bare[1].trim() : null

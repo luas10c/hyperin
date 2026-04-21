@@ -41,21 +41,21 @@ export interface RouterOptions {
 
 export interface ShutdownOptions {
   /**
-   * Tempo máximo em ms para aguardar requests em andamento terminarem.
-   * Após esse tempo, as conexões restantes são destruídas forçadamente.
+   * Maximum time in ms to wait for ongoing requests to finish.
+   * After this time, the remaining connections are forcibly destroyed.
    * Default: 10000 (10s)
    */
   timeout?: number
   /**
-   * Callback chamado quando todos os requests drenaram com sucesso.
+   * Callback invoked when all requests have drained successfully.
    */
   onShutdown?: () => void | Promise<void>
   /**
-   * Callback chamado se o shutdown exceder o timeout sem drenar.
+   * Callback invoked if the shutdown exceeds the timeout without draining.
    */
   onTimeout?: () => void | Promise<void>
   /**
-   * Sinais do SO a interceptar. Default: ['SIGTERM', 'SIGINT']
+   * OS signals to intercept. Default: ['SIGTERM', 'SIGINT']
    */
   signals?: NodeJS.Signals[]
 }
@@ -950,10 +950,10 @@ type RouteMethodName =
 export function hyperin(): Application {
   const core = new Hyperin()
 
-  // Cria o http.Server imediatamente com as classes customizadas.
-  // Isso é necessário para que supertest(app) receba um Server real
-  // e use Request/Response corretos, em vez de criar um http.createServer
-  // genérico internamente.
+  // Create the http.Server immediately with the custom classes.
+  // This is necessary so that supertest(app) receives a real Server
+  // and uses the proper Request/Response implementations, instead of
+  // creating a generic http.createServer internally.
   const server = createServer(
     { IncomingMessage: Request, ServerResponse: Response },
     async (req: IncomingMessage, res: ServerResponse) => {
@@ -986,7 +986,7 @@ export function hyperin(): Application {
     return register as RouteMethod<Application>
   }
 
-  // O app é o próprio Server — assim supertest(app) funciona diretamente.
+  // The app is the server itself — thus supertest(app) works directly.
   // Métodos de rota e middleware são adicionados via Object.assign.
   const app = Object.assign(server, {
     use,
@@ -1016,7 +1016,7 @@ export function hyperin(): Application {
     handler: core.handler
   }) as Application
 
-  // listen() passa o hostname opcionalmente, mantendo a assinatura original.
+  // listen() optionally accepts the hostname, preserving the original signature.
   const serverListen = server.listen.bind(server)
 
   Object.assign(app, {

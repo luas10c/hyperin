@@ -39,10 +39,10 @@ export function serveStatic(
   const { index = true, maxAge = 0, etag = true, dotfiles = 'ignore' } = options
 
   return async ({ request, response }) => {
-    // request.path já chegou stripado pelo use() — ex: '/foto.jpg' em vez de '/uploads/foto.jpg'
+    // request.path already stripped by use() — e.g., '/photo.jpg' instead of '/uploads/photo.jpg'
     const urlPath = decodeURIComponent(request.path || '/')
 
-    // Previne path traversal
+    // Prevent path traversal
     const filePath = resolve(join(directory, urlPath))
     if (!filePath.startsWith(directory)) {
       return void response
@@ -76,7 +76,7 @@ export function serveStatic(
         .json({ statusCode: 404, error: 'Not Found', method: request.method })
     }
 
-    // Diretório → tenta servir index
+    // Directory → attempts to serve index
     if (fileStat.isDirectory()) {
       if (!index) {
         return void response

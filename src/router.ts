@@ -89,7 +89,7 @@ function forEachPathSegment(
   }
 }
 
-/** Cache para não re-executar toString + regex na mesma função */
+// Cache to avoid re-executing toString + regex in the same function
 const errorMwCache = new WeakMap<object, boolean>()
 
 function detectDestructuredErrorParam(source: string): boolean | null {
@@ -107,11 +107,11 @@ function detectDestructuredErrorParam(source: string): boolean | null {
 }
 
 /**
- * Detecta se a função é um ErrorMiddleware inspecionando o primeiro parâmetro.
- * Cobre dois padrões:
- *  1. Desestruturação nativa:  ({ error, ... }) =>
- *  2. Compilado TS/Babel:      function(_a) { var error = _a.error  /  let { error } = _ref
- * Resultado cacheado em WeakMap — custo pago uma única vez por função registrada.
+ * Detects whether the function is an ErrorMiddleware by inspecting the first parameter.
+ * It covers two patterns:
+ *  1. Native destructuring:  ({ error, ... }) =>
+ *  2. Compiled TS:      function(_a) { var error = _a.error  /  let { error } = _ref
+ * Result cached in WeakMap — cost paid once per registered function.
  */
 function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
   const cached = errorMwCache.get(fn)
@@ -119,7 +119,7 @@ function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
 
   const src = fn.toString()
 
-  // Padrão 1: desestruturação nativa no primeiro parâmetro — ({ error, ... })
+  // Pattern 1: native destructuring in the first parameter — ({ error, ... })
   const destructured = detectDestructuredErrorParam(src)
   if (destructured !== null) {
     const result = destructured
@@ -127,7 +127,7 @@ function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
     return result
   }
 
-  // Padrão 2: código compilado pelo TypeScript/Babel
+  // Pattern 2: code compiled by TypeScript
   //   function(_a) { var error = _a.error ... }
   //   (_ref) => { let { error } = _ref ... }
   const result = /\b(?:var|let|const)\s+(?:\{[^}]*\berror\b|error\s*=)/.test(

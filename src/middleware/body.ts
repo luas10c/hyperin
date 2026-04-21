@@ -20,41 +20,29 @@ type MiddlewareContext = HandlerContext & { next: NextFunction }
 type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
 
 export interface BodyParserOptions {
-  /** Tamanho máximo do body. Ex: '100kb', '1mb'. Default: '100kb' */
+  /** Maximum body size. Ex: '100kb', '1mb'. Default: '100kb' */
   limit?: string | number
   /**
-   * Charset padrão. Suporta 'utf-8' e 'latin1' / 'iso-8859-1'.
+   * Default charset. Supports 'utf-8' and 'latin1' / 'iso-8859-1'.
    * Default: 'utf-8'
    */
   defaultCharset?: 'utf-8' | 'latin1'
-  /**
-   * Permite inflar (descomprimir) gzip/deflate/br.
-   * Default: true
-   */
+  /** Allows inflating (decompressing) gzip/deflate/br. */
   inflate?: boolean
-  /**
-   * Verifica o body cru antes de parsear.
-   * Lança um erro para abortar o parse.
-   */
+  /** Verifies the raw body before parsing. */
+  /** Throws an error to abort parsing. */
   verify?: (req: Request, res: Response, buf: Buffer, encoding: string) => void
-  /**
-   * Tipo de Content-Type aceito.
-   * String, array de strings ou função.
-   * Default para json: 'application/json'
-   * Default para urlencoded: 'application/x-www-form-urlencoded'
-   */
+  /** Accepted Content-Type. Type can be string, string[] or function. */
+  /** Default for JSON: 'application/json' */
+  /** Default for URL-encoded: 'application/x-www-form-urlencoded' */
   type?: string | string[] | ((req: Request) => boolean)
 }
 
 export interface JsonOptions extends BodyParserOptions {
-  /**
-   * strict: só aceita objeto ou array no topo do JSON.
-   * Default: true
-   */
+  /** strict: only accepts object or array at the top of JSON. */
+  /** Default: true */
   strict?: boolean
-  /**
-   * Reviver passado ao JSON.parse.
-   */
+  /** Reviver passed to JSON.parse. */
   reviver?: (key: string, value: unknown) => unknown
 }
 
@@ -70,16 +58,15 @@ export interface UrlencodedOptions extends BodyParserOptions {
    * Default: 32
    */
   depth?: number
-  /**
-   * Número máximo de parâmetros.
-   * Default: 1000
-   */
+  /** Maximum number of parameters.
+    * Default: 1000
+    */
   parameterLimit?: number
 }
 
 // ── helpers internos ──────────────────────────────────────────
 
-/** Extrai o charset do Content-Type, ex: 'utf-8', 'iso-8859-1' */
+/** Extracts the charset from Content-Type, e.g. 'utf-8', 'iso-8859-1' */
 function getCharset(contentType: string, fallback: string): string {
   const match = contentType.match(/charset=([^\s;]+)/i)
   const raw = match
@@ -107,7 +94,7 @@ function matchesType(
   return types.some((t) => {
     t = t.trim().toLowerCase()
     if (t.includes('/')) {
-      // mime type exato ou wildcard: '*/*', '*/json', 'application/*'
+      // mime type exact or wildcard: '*/*', '*/json', 'application/*'
       const [tType, tSubtype] = t.split('/')
       const [ctType, ctSubtype] = ct.split('/')
       return (
@@ -120,7 +107,7 @@ function matchesType(
   })
 }
 
-/** Lê e descomprime o body, respeitando o limite */
+/** Reads and decompresses the body, respecting the limit */
 async function readRawBody(
   req: Request,
   options: { inflate: boolean; limit: number }
@@ -141,7 +128,7 @@ async function readRawBody(
   return readDecodedBody(req, options.limit)
 }
 
-/** Resolve o limite em bytes a partir de string ou number */
+/** Resolve the limit in bytes from a string or number */
 function resolveLimit(
   limit: string | number | undefined,
   fallback: string
@@ -178,7 +165,7 @@ export function json(options: JsonOptions = {}): Middleware {
       return void (await next())
     }
 
-    // 2. Charset — JSON aceita apenas utf-8 / utf-16 / utf-32 (RFC 4627)
+    // 2. Charset — JSON accepts only utf-8 / utf-16 / utf-32 (RFC 4627)
     //    Na prática, só permitimos utf-8 e latin1 como fallback.
     const charset = getCharset(
       request.headers['content-type'] || '',
@@ -192,7 +179,7 @@ export function json(options: JsonOptions = {}): Middleware {
       })
     }
 
-    // 3. Lê o body
+    // 3. Read the body
     let buf: Buffer
     try {
       buf = await readRawBody(request, { inflate, limit })
@@ -251,9 +238,8 @@ export function json(options: JsonOptions = {}): Middleware {
 // urlencoded()
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Parser simples (extended: false) — equivalente ao `querystring` nativo.
- * Suporta apenas string e string[] por chave.
+/** Simple parser (extended: false) — equivalent to the native `querystring`.
+ * Supports only string and string[] per key.
  */
 function parseSimple(
   text: string,
@@ -293,9 +279,8 @@ function parseSimple(
   return result
 }
 
-/**
- * Parser rico (extended: true) — suporta objetos aninhados e arrays.
- * Ex: `user[name]=John&user[age]=30&tags[]=a&tags[]=b`
+/** Rich parser (extended: true) — supports nested objects and arrays.
+ * Example: `user[name]=John&user[age]=30&tags[]=a&tags[]=b`
  */
 function parseExtended(
   text: string,
@@ -315,7 +300,7 @@ function parseExtended(
   return result
 }
 
-/** Atribui `value` em `obj` seguindo a notação `key[sub][sub2]` */
+/** Assigns `value` to `obj` following the notation `key[sub][sub2]` */
 function assignDeep(
   obj: Record<string, unknown>,
   key: string,
@@ -333,7 +318,7 @@ function assignDeep(
 
   const bracketIdx = key.indexOf('[')
 
-  // Chave simples: sem colchetes
+  // Simple key: no brackets
   if (bracketIdx === -1) {
     const existing = obj[key]
     if (existing === undefined) {
@@ -350,14 +335,14 @@ function assignDeep(
   const rest = key.slice(bracketIdx + 1, key.indexOf(']', bracketIdx))
   const tail = key.slice(key.indexOf(']', bracketIdx) + 1)
 
-  // tags[] → array
+  // tags[] -> array
   if (rest === '') {
     if (!Array.isArray(obj[head])) obj[head] = []
     ;(obj[head] as unknown[]).push(value)
     return
   }
 
-  // user[name] → objeto
+  // user[name] -> object
   if (!obj[head] || typeof obj[head] !== 'object') {
     obj[head] = {}
   }
@@ -395,7 +380,7 @@ export function urlencoded(options: UrlencodedOptions = {}): Middleware {
       return void (await next())
     }
 
-    // 2. Charset — urlencoded suporta utf-8 e latin1
+  // 2. Charset — urlencoded supports utf-8 and latin1
     const charset = getCharset(
       request.headers['content-type'] || '',
       defaultCharset
