@@ -125,7 +125,7 @@ export function cors(options: CorsOptions = {}): Middleware {
     // ── Preflight (OPTIONS) ────────────────────────────────────
     if (request.method === 'OPTIONS') {
       if (allowOrigin === false) {
-      // origin not allowed — pass to the next handler
+        // origin not allowed — pass to the next handler
         if (cfg.preflightContinue) return void (await next())
         return void response.status(cfg.optionsSuccessStatus).send()
       }

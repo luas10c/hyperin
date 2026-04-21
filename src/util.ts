@@ -105,17 +105,17 @@ export async function parseMultipart(
   const parts = splitBuffer(body, delimiter)
 
   for (const part of parts) {
-  // Ignore the epilogue (last "--")
+    // Ignore the epilogue (last "--")
     if (part.equals(Buffer.from('--\r\n')) || part.equals(Buffer.from('--'))) {
       continue
     }
 
-  // Remove the initial CRLF from each part
+    // Remove the initial CRLF from each part
     const partContent = part.subarray(0, 2).equals(Buffer.from(CRLF))
       ? part.subarray(2)
       : part
 
-  // Split headers from the body of the part
+    // Split headers from the body of the part
     const separatorIndex = indexOfDoubleNewline(partContent)
     if (separatorIndex === -1) continue
 
@@ -123,9 +123,9 @@ export async function parseMultipart(
       .subarray(0, separatorIndex)
       .toString('utf8')
 
-  // +4 to skip the \r\n\r\n
+    // +4 to skip the \r\n\r\n
     const bodyBuffer = partContent.subarray(separatorIndex + 4)
-  // Remove the trailing CRLF from the body
+    // Remove the trailing CRLF from the body
     const bodyContent = partContent
       .subarray(partContent.length - 2)
       .equals(Buffer.from(CRLF))
@@ -165,7 +165,7 @@ export async function parseMultipart(
       }
 
       if (onFile) {
-      // Create a readable stream from the buffer and pass it to the handler
+        // Create a readable stream from the buffer and pass it to the handler
         const stream = Readable.from(bodyContent)
         files[fieldname] = await onFile(stream, info)
       }
@@ -237,7 +237,7 @@ export function pipeFile(
   const ifModifiedSince = request.headers['if-modified-since']
   if (ifModifiedSince) {
     const since = new Date(ifModifiedSince).getTime()
-  // Truncate to seconds — same precision as the HTTP header
+    // Truncate to seconds — same precision as the HTTP header
     if (
       !isNaN(since) &&
       Math.floor((stat!.mtimeMs as number) / 1000) <= Math.floor(since / 1000)

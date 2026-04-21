@@ -58,9 +58,10 @@ export interface UrlencodedOptions extends BodyParserOptions {
    * Default: 32
    */
   depth?: number
-  /** Maximum number of parameters.
-    * Default: 1000
-    */
+  /**
+   * Maximum number of parameters.
+   * Default: 1000
+   */
   parameterLimit?: number
 }
 
@@ -380,7 +381,7 @@ export function urlencoded(options: UrlencodedOptions = {}): Middleware {
       return void (await next())
     }
 
-  // 2. Charset — urlencoded supports utf-8 and latin1
+    // 2. Charset — urlencoded supports utf-8 and latin1
     const charset = getCharset(
       request.headers['content-type'] || '',
       defaultCharset

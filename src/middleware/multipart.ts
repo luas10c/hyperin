@@ -35,7 +35,7 @@ export interface MultipartOptions {
    * Receives the file stream and metadata.
    * The returned value is available in `request.files[fieldname]`.
    *
-    * @example Upload to S3
+   * @example Upload to S3
    * ```ts
    * onFile: async (stream, info) => {
    *   const upload = new Upload({
@@ -46,7 +46,7 @@ export interface MultipartOptions {
    * }
    * ```
    *
-    * @example Save locally (old behavior)
+   * @example Save locally (old behavior)
    * ```ts
    * onFile: (stream, info) => {
    *   const dest = path.join('./uploads', info.filename)
