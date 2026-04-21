@@ -226,7 +226,7 @@ export function throttler(options: RateLimitOptions = {}): Middleware {
   const standardHeaders = options.standardHeaders ?? true
   const legacyHeaders = options.legacyHeaders ?? false
   const statusCode = options.statusCode ?? 429
-  const message = options.message ?? { error: 'Too Many Requests' }
+  const message = options.message ?? 'Too Many Requests'
 
   return async ({ request, response, next }) => {
     if (options.skip?.(request, response)) {
@@ -245,13 +245,11 @@ export function throttler(options: RateLimitOptions = {}): Middleware {
     )
 
     if (!result.allowed) {
-      response.status(statusCode)
-
-      if (typeof message === 'string') {
-        response.text(message)
-      } else {
-        response.json(message)
-      }
+      response.status(statusCode).json({
+        statusCode: 429,
+        path: request.url,
+        message
+      })
 
       return
     }
