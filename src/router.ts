@@ -41,10 +41,6 @@ function isDynamicPath(path: string): boolean {
   return false
 }
 
-function createStaticRouteKey(method: string, path: string): string {
-  return `${method} ${path}`
-}
-
 export interface MatchResult {
   handlers: Handler[]
   middlewares: Handler[]
@@ -56,7 +52,24 @@ interface DynamicMatch {
   node: TrieNode
   paramNames: string[]
   paramValues: string[]
+  paramCount: number
 }
+
+type DynamicFallback =
+  | {
+      kind: 'param'
+      node: TrieNode
+      index: number
+      name: string
+      value: string
+      paramCount: number
+    }
+  | {
+      kind: 'wildcard'
+      node: TrieNode
+      start: number
+      paramCount: number
+    }
 
 function forEachPathSegment(
   path: string,
@@ -79,6 +92,20 @@ function forEachPathSegment(
 /** Cache para não re-executar toString + regex na mesma função */
 const errorMwCache = new WeakMap<object, boolean>()
 
+function detectDestructuredErrorParam(source: string): boolean | null {
+  const parenIndex = source.indexOf('(')
+  if (parenIndex === -1) return null
+
+  let index = parenIndex + 1
+  while (index < source.length && /\s/.test(source[index])) index++
+  if (source[index] !== '{') return null
+
+  const closingBraceIndex = source.indexOf('}', index + 1)
+  if (closingBraceIndex === -1) return null
+
+  return /\berror\b/.test(source.slice(index + 1, closingBraceIndex))
+}
+
 /**
  * Detecta se a função é um ErrorMiddleware inspecionando o primeiro parâmetro.
  * Cobre dois padrões:
@@ -93,9 +120,9 @@ function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
   const src = fn.toString()
 
   // Padrão 1: desestruturação nativa no primeiro parâmetro — ({ error, ... })
-  const nativeMatch = src.match(/^[^(]*\(\s*\{([^}]*)/)
-  if (nativeMatch) {
-    const result = /\berror\b/.test(nativeMatch[1])
+  const destructured = detectDestructuredErrorParam(src)
+  if (destructured !== null) {
+    const result = destructured
     errorMwCache.set(fn, result)
     return result
   }
@@ -106,12 +133,13 @@ function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
   const result = /\b(?:var|let|const)\s+(?:\{[^}]*\berror\b|error\s*=)/.test(
     src
   )
+  errorMwCache.set(fn, result)
   return result
 }
 
 export class RadixRouter {
   private readonly root: TrieNode = createNode()
-  private readonly staticRoutes = new Map<string, Handler[]>()
+  private readonly staticRoutes = new Map<HttpMethod, Map<string, Handler[]>>()
   private readonly middlewares: Handler[] = []
   private readonly _errorMiddlewares: ErrorMiddleware[] = []
   private readonly _routes: [HttpMethod, string, Handler[]][] = []
@@ -139,7 +167,14 @@ export class RadixRouter {
     this._routes.push([method, path, handlers])
 
     if (!isDynamicPath(path)) {
-      this.staticRoutes.set(createStaticRouteKey(method, path), handlers)
+      let routesByMethod = this.staticRoutes.get(method)
+
+      if (!routesByMethod) {
+        routesByMethod = new Map<string, Handler[]>()
+        this.staticRoutes.set(method, routesByMethod)
+      }
+
+      routesByMethod.set(path, handlers)
       return
     }
 
@@ -173,8 +208,8 @@ export class RadixRouter {
 
   match(method: string, path: string): MatchResult | null {
     const staticHandlers =
-      this.staticRoutes.get(createStaticRouteKey(method, path)) ??
-      this.staticRoutes.get(createStaticRouteKey('ALL', path))
+      this.staticRoutes.get(method as HttpMethod)?.get(path) ??
+      this.staticRoutes.get('ALL')?.get(path)
 
     if (staticHandlers) {
       return {
@@ -198,7 +233,7 @@ export class RadixRouter {
       return null
     }
 
-    const dynamicMatch = this.#traverse(this.root, path, 0, [], [])
+    const dynamicMatch = this.#traverse(path)
 
     const routeHandlers = dynamicMatch?.node.isEnd
       ? dynamicMatch.node.handlers.get(method as HttpMethod) ||
@@ -211,7 +246,8 @@ export class RadixRouter {
         middlewares: this.middlewares,
         params: this.#buildParams(
           dynamicMatch.paramNames,
-          dynamicMatch.paramValues
+          dynamicMatch.paramValues,
+          dynamicMatch.paramCount
         ),
         matched: true
       }
@@ -229,81 +265,108 @@ export class RadixRouter {
     return null
   }
 
-  #traverse(
-    node: TrieNode,
-    path: string,
-    index: number,
-    paramNames: string[],
-    paramValues: string[]
-  ): DynamicMatch | null {
-    let start = index
-    while (start < path.length && path.charCodeAt(start) === 47) start++
-    if (start >= path.length) {
-      return {
-        node,
-        paramNames: [...paramNames],
-        paramValues: [...paramValues]
+  #traverse(path: string): DynamicMatch | null {
+    const paramNames: string[] = []
+    const paramValues: string[] = []
+    const fallbacks: DynamicFallback[] = []
+    let node = this.root
+    let index = 0
+    let paramCount = 0
+
+    traverse: while (true) {
+      let start = index
+      while (start < path.length && path.charCodeAt(start) === 47) start++
+
+      if (start >= path.length) {
+        return {
+          node,
+          paramNames,
+          paramValues,
+          paramCount
+        }
       }
-    }
 
-    let end = start + 1
-    while (end < path.length && path.charCodeAt(end) !== 47) end++
+      let end = start + 1
+      while (end < path.length && path.charCodeAt(end) !== 47) end++
 
-    const nextIndex = end
-    const segment = path.slice(start, end)
+      const nextIndex = end
+      const segment = path.slice(start, end)
 
-    // 1. Exact match (fastest path)
-    const exactChild = node.children.get(segment)
-
-    if (exactChild) {
-      const result = this.#traverse(
-        exactChild,
-        path,
-        nextIndex,
-        paramNames,
-        paramValues
-      )
-      if (result) return result
-    }
-
-    // 2. Param match
-    if (node.paramChild) {
-      paramNames.push(node.paramChild.paramName!)
-      paramValues.push(segment)
-      const result = this.#traverse(
-        node.paramChild,
-        path,
-        nextIndex,
-        paramNames,
-        paramValues
-      )
-      if (result) return result
-      paramNames.pop()
-      paramValues.pop()
-    }
-
-    // 3. Wildcard match
-    if (node.wildcardChild) {
-      let wildcardEnd = path.length
-      while (wildcardEnd > start && path.charCodeAt(wildcardEnd - 1) === 47) {
-        wildcardEnd--
+      if (node.wildcardChild) {
+        fallbacks.push({
+          kind: 'wildcard',
+          node: node.wildcardChild,
+          start,
+          paramCount
+        })
       }
-      return {
-        node: node.wildcardChild,
-        paramNames: [...paramNames, '*'],
-        paramValues: [...paramValues, path.slice(start, wildcardEnd)]
-      }
-    }
 
-    return null
+      if (node.paramChild) {
+        fallbacks.push({
+          kind: 'param',
+          node: node.paramChild,
+          index: nextIndex,
+          name: node.paramChild.paramName!,
+          value: segment,
+          paramCount
+        })
+      }
+
+      const exactChild = node.children.get(segment)
+      if (exactChild) {
+        node = exactChild
+        index = nextIndex
+        continue
+      }
+
+      while (fallbacks.length > 0) {
+        const fallback = fallbacks.pop()!
+
+        if (fallback.kind === 'param') {
+          paramNames[fallback.paramCount] = fallback.name
+          paramValues[fallback.paramCount] = fallback.value
+          paramCount = fallback.paramCount + 1
+          node = fallback.node
+          index = fallback.index
+          continue traverse
+        }
+
+        let wildcardEnd = path.length
+        while (
+          wildcardEnd > fallback.start &&
+          path.charCodeAt(wildcardEnd - 1) === 47
+        ) {
+          wildcardEnd--
+        }
+
+        paramNames[fallback.paramCount] = '*'
+        paramValues[fallback.paramCount] = path.slice(
+          fallback.start,
+          wildcardEnd
+        )
+
+        return {
+          node: fallback.node,
+          paramNames,
+          paramValues,
+          paramCount: fallback.paramCount + 1
+        }
+      }
+
+      return null
+    }
   }
 
-  #buildParams(names: string[], values: string[]): Record<string, string> {
-    if (names.length === 0) return {}
+  #buildParams(
+    names: string[],
+    values: string[],
+    count: number
+  ): Record<string, string> {
+    if (count === 0) return {}
 
     const params: Record<string, string> = {}
 
-    for (let i = 0; i < names.length; i++) {
+    for (let i = 0; i < count; i++) {
       params[names[i]] = values[i]
     }
 
