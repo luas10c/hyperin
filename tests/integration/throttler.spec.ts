@@ -29,7 +29,13 @@ describe('throttler middleware', () => {
     expect(second.headers['ratelimit-remaining']).toBe('0')
 
     expect(third.status).toBe(429)
-    expect(third.body).toEqual({ error: 'Too Many Requests' })
+    expect(third.body).toEqual(
+      expect.objectContaining({
+        statusCode: 429,
+        path: '/limited',
+        message: 'Too Many Requests'
+      })
+    )
     expect(third.headers['retry-after']).toBeDefined()
     expect(third.headers['ratelimit-policy']).toBe('2;w=60')
   })
@@ -78,10 +84,14 @@ describe('throttler middleware', () => {
     app.use(throttler({ store, message: 'blocked' }))
     app.get('/custom', () => 'ok')
 
-    const response: Response = await request(app).get('/custom')
+    const response: Response = await request(app).get('/custom').send()
 
     expect(response.status).toBe(429)
-    expect(response.text).toBe('blocked')
+    expect(response.body).toEqual({
+      statusCode: 429,
+      path: '/custom',
+      message: 'blocked'
+    })
   })
 
   test('suporta algoritmo token bucket', async () => {
