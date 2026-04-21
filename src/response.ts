@@ -54,32 +54,38 @@ export class Response extends ServerResponse<Request> {
     return str.length
   }
 
-  json<T extends object>(obj: T): this {
-    if (this.sent) return this
-    this.setHeader('Content-Type', 'application/json; charset=utf-8')
-    const body = JSON.stringify(obj)
-    this.setHeader('Content-Length', this.#byteLength(body))
-    this.end(body)
+  #endWithStringBody(contentType: string, value: string): this {
+    this.setHeader('Content-Type', contentType)
+    this.setHeader('Content-Length', this.#byteLength(value))
+    this.end(value)
     this.#sent = true
     return this
+  }
+
+  #endWithBufferBody(contentType: string, value: Buffer): this {
+    this.setHeader('Content-Type', contentType)
+    this.setHeader('Content-Length', value.length)
+    this.end(value)
+    this.#sent = true
+    return this
+  }
+
+  json<T extends object>(obj: T): this {
+    if (this.sent) return this
+    return this.#endWithStringBody(
+      'application/json; charset=utf-8',
+      JSON.stringify(obj)
+    )
   }
 
   text(value: string): this {
     if (this.sent) return this
-    this.setHeader('Content-Type', 'text/plain; charset=utf-8')
-    this.setHeader('Content-Length', this.#byteLength(value))
-    this.end(value)
-    this.#sent = true
-    return this
+    return this.#endWithStringBody('text/plain; charset=utf-8', value)
   }
 
   html(value: string): this {
     if (this.sent) return this
-    this.setHeader('Content-Type', 'text/html; charset=utf-8')
-    this.setHeader('Content-Length', this.#byteLength(value))
-    this.end(value)
-    this.#sent = true
-    return this
+    return this.#endWithStringBody('text/html; charset=utf-8', value)
   }
 
   send(body?: string | object | Buffer): this {
@@ -92,11 +98,7 @@ export class Response extends ServerResponse<Request> {
     }
 
     if (Buffer.isBuffer(body)) {
-      this.setHeader('Content-Type', 'application/octet-stream')
-      this.setHeader('Content-Length', body.length)
-      this.end(body)
-      this.#sent = true
-      return this
+      return this.#endWithBufferBody('application/octet-stream', body)
     }
 
     if (typeof body === 'object') {

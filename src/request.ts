@@ -24,8 +24,6 @@ export class Request<
 > extends IncomingMessage {
   /** Parsed route params e.g. /users/:id → req.params.id */
   params = {} as TParams
-  /** Parsed query string */
-  query = {} as TQuery
   /** Parsed body (requires json middleware) */
   body = undefined as TBody
   /** Uploaded files (requires multipart middleware) */
@@ -39,6 +37,8 @@ export class Request<
 
   #parsedUrl: URL | null = null
   #path: string | null = null
+  #query: TQuery | null = null
+  #rawQuery: string | null = null
 
   static #extractPathname(rawUrl: string): string {
     if (!rawUrl) return '/'
@@ -65,6 +65,45 @@ export class Request<
     return pathname.charCodeAt(0) === 47 ? pathname : `/${pathname}`
   }
 
+  static #decodeQueryComponent(value: string): string {
+    const normalized = value.includes('+') ? value.replace(/\+/g, ' ') : value
+
+    try {
+      return decodeURIComponent(normalized)
+    } catch {
+      return normalized
+    }
+  }
+
+  static #parseQueryString(query: string): ParsedUrlQuery {
+    const parsed: ParsedUrlQuery = {}
+    let index = 0
+
+    while (index < query.length) {
+      let separator = query.indexOf('&', index)
+      if (separator === -1) separator = query.length
+
+      if (separator > index) {
+        const entry = query.slice(index, separator)
+        const equals = entry.indexOf('=')
+        const rawKey = equals === -1 ? entry : entry.slice(0, equals)
+
+        if (rawKey) {
+          const key = Request.#decodeQueryComponent(rawKey)
+          const value =
+            equals === -1
+              ? ''
+              : Request.#decodeQueryComponent(entry.slice(equals + 1))
+          parsed[key] = value
+        }
+      }
+
+      index = separator + 1
+    }
+
+    return parsed
+  }
+
   constructor(socket: Socket) {
     super(socket)
   }
@@ -79,9 +118,32 @@ export class Request<
     return this.#parsedUrl
   }
 
+  get query(): TQuery {
+    if (this.#query === null) {
+      this.#query = (
+        this.#rawQuery ? Request.#parseQueryString(this.#rawQuery) : {}
+      ) as TQuery
+    }
+
+    return this.#query
+  }
+
+  set query(value: TQuery) {
+    this.#query = value
+    this.#rawQuery = null
+  }
+
+  setParsedTarget(path: string | null, rawQuery: string | null): void {
+    this.#path = path
+    this.#query = null
+    this.#rawQuery = rawQuery
+  }
+
   resetParsedUrl(): void {
     this.#parsedUrl = null
     this.#path = null
+    this.#query = null
+    this.#rawQuery = null
   }
 
   get path(): string {
