@@ -141,7 +141,7 @@ function createScalarDocument(options?: ScalarOptions): string {
   <body>
     <div id="app"></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.52.4" integrity="sha384-tPvZsWUisjPSa5t4cFmEhJq3K4mfQ7uXu1jPs+Nkke/8etOBqVXEdg4uOlb0RzSU" crossorigin="anonymous"></script>
     <script>
       fetch(${serializeScriptValue(openapiUrl)})
         .then((response) => response.ok ? response.json() : null)
