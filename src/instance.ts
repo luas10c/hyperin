@@ -5,7 +5,6 @@ import {
   ServerResponse
 } from 'node:http'
 import type { Socket } from 'node:net'
-import type { ParsedUrlQuery } from 'node:querystring'
 
 import { Request } from './request'
 import { Response } from './response'
@@ -119,140 +118,13 @@ type RouteStep5<
 >
 
 interface RouteMethod<TSelf> {
-  <const TPath extends string, TOptions extends RouteSchemaOptions>(
+  <const TPath extends string>(
     path: TPath,
-    handler: TypedMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
-    options: TOptions
-  ): TSelf
-  <
-    const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>
-  >(
-    path: TPath,
-    h1: T1,
-    options: TOptions
-  ): TSelf
-  <
-    const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >
-  >(
-    path: TPath,
-    h1: T1,
-    h2: T2,
-    options: TOptions
-  ): TSelf
-  <
-    const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-        T2
-      >
-    >
-  >(
-    path: TPath,
-    h1: T1,
-    h2: T2,
-    h3: T3,
-    options: TOptions
-  ): TSelf
-  <
-    const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-        T2
-      >
-    >,
-    T4 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-          T2
-        >,
-        T3
-      >
-    >
-  >(
-    path: TPath,
-    h1: T1,
-    h2: T2,
-    h3: T3,
-    h4: T4,
-    options: TOptions
-  ): TSelf
-  <
-    const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-        T2
-      >
-    >,
-    T4 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-          T2
-        >,
-        T3
-      >
-    >,
-    T5 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<
-            ApplyMiddleware<
-              ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
-              T1
-            >,
-            T2
-          >,
-          T3
-        >,
-        T4
-      >
-    >
-  >(
-    path: TPath,
-    h1: T1,
-    h2: T2,
-    h3: T3,
-    h4: T4,
-    h5: T5,
-    options: TOptions
+    ...handlers: [...Handler[], RouteStep1<TPath>]
   ): TSelf
   <const TPath extends string, T1 extends RouteStep1<TPath>>(
     path: TPath,
-    h1: T1
+    ...handlers: [...Handler[], T1, RouteStep2<TPath, T1>]
   ): TSelf
   <
     const TPath extends string,
@@ -260,8 +132,7 @@ interface RouteMethod<TSelf> {
     T2 extends RouteStep2<TPath, T1>
   >(
     path: TPath,
-    h1: T1,
-    h2: T2
+    ...handlers: [...Handler[], T1, T2, RouteStep3<TPath, T1, T2>]
   ): TSelf
   <
     const TPath extends string,
@@ -270,9 +141,7 @@ interface RouteMethod<TSelf> {
     T3 extends RouteStep3<TPath, T1, T2>
   >(
     path: TPath,
-    h1: T1,
-    h2: T2,
-    h3: T3
+    ...handlers: [...Handler[], T1, T2, T3, RouteStep4<TPath, T1, T2, T3>]
   ): TSelf
   <
     const TPath extends string,
@@ -282,25 +151,148 @@ interface RouteMethod<TSelf> {
     T4 extends RouteStep4<TPath, T1, T2, T3>
   >(
     path: TPath,
-    h1: T1,
-    h2: T2,
-    h3: T3,
-    h4: T4
+    ...handlers: [
+      ...Handler[],
+      T1,
+      T2,
+      T3,
+      T4,
+      RouteStep5<TPath, T1, T2, T3, T4>
+    ]
+  ): TSelf
+  <const TPath extends string, TOptions extends RouteSchemaOptions>(
+    path: TPath,
+    ...handlers: [
+      ...Handler[],
+      RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
+      TOptions & RouteSchemaOptions
+    ]
   ): TSelf
   <
     const TPath extends string,
-    T1 extends RouteStep1<TPath>,
-    T2 extends RouteStep2<TPath, T1>,
-    T3 extends RouteStep3<TPath, T1, T2>,
-    T4 extends RouteStep4<TPath, T1, T2, T3>,
-    T5 extends RouteStep5<TPath, T1, T2, T3, T4>
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>
   >(
     path: TPath,
-    h1: T1,
-    h2: T2,
-    h3: T3,
-    h4: T4,
-    h5: T5
+    ...handlers: [
+      ...Handler[],
+      T1,
+      RouteMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+      >,
+      TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >
+  >(
+    path: TPath,
+    ...handlers: [
+      ...Handler[],
+      T1,
+      T2,
+      RouteMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+          T2
+        >
+      >,
+      TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >
+    >
+  >(
+    path: TPath,
+    ...handlers: [
+      ...Handler[],
+      T1,
+      T2,
+      T3,
+      RouteMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<
+            ApplyMiddleware<
+              ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
+              T1
+            >,
+            T2
+          >,
+          T3
+        >
+      >,
+      TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >
+    >,
+    T4 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+          T2
+        >,
+        T3
+      >
+    >
+  >(
+    path: TPath,
+    ...handlers: [
+      ...Handler[],
+      T1,
+      T2,
+      T3,
+      T4,
+      RouteMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<
+            ApplyMiddleware<
+              ApplyMiddleware<
+                ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
+                T1
+              >,
+              T2
+            >,
+            T3
+          >,
+          T4
+        >
+      >,
+      TOptions & RouteSchemaOptions
+    ]
   ): TSelf
 }
 
@@ -328,49 +320,12 @@ export interface Application extends Server<typeof Request, typeof Response> {
   handler: Hyperin['handler']
 }
 
-function decodeQueryComponent(value: string): string {
-  const normalized = value.includes('+') ? value.replace(/\+/g, ' ') : value
-
-  try {
-    return decodeURIComponent(normalized)
-  } catch {
-    return normalized
-  }
-}
-
-function parseQueryString(query: string): ParsedUrlQuery {
-  const parsed: ParsedUrlQuery = {}
-  let index = 0
-
-  while (index < query.length) {
-    let separator = query.indexOf('&', index)
-    if (separator === -1) separator = query.length
-
-    if (separator > index) {
-      const entry = query.slice(index, separator)
-      const equals = entry.indexOf('=')
-      const rawKey = equals === -1 ? entry : entry.slice(0, equals)
-
-      if (rawKey) {
-        const key = decodeQueryComponent(rawKey)
-        const value =
-          equals === -1 ? '' : decodeQueryComponent(entry.slice(equals + 1))
-        parsed[key] = value
-      }
-    }
-
-    index = separator + 1
-  }
-
-  return parsed
-}
-
 function parseRequestTarget(rawUrl: string): {
   path: string
-  query: ParsedUrlQuery
+  rawQuery: string | null
 } {
   if (!rawUrl) {
-    return { path: '/', query: {} }
+    return { path: '/', rawQuery: null }
   }
 
   let pathStart = 0
@@ -380,7 +335,7 @@ function parseRequestTarget(rawUrl: string): {
     const firstSlash = rawUrl.indexOf('/', authorityStart + 2)
 
     if (firstSlash === -1) {
-      return { path: '/', query: {} }
+      return { path: '/', rawQuery: null }
     }
 
     pathStart = firstSlash
@@ -401,7 +356,7 @@ function parseRequestTarget(rawUrl: string): {
     : '/'
 
   if (queryStart === -1) {
-    return { path, query: {} }
+    return { path, rawQuery: null }
   }
 
   const queryEnd =
@@ -409,7 +364,7 @@ function parseRequestTarget(rawUrl: string): {
 
   return {
     path,
-    query: parseQueryString(rawUrl.slice(queryStart + 1, queryEnd))
+    rawQuery: rawUrl.slice(queryStart + 1, queryEnd)
   }
 }
 
@@ -504,22 +459,21 @@ class Hyperin {
 
       const scoped: Handler = async ({ request, response, next }) => {
         const originalUrl = request.url || '/'
-        const rawPath = originalUrl.split('?')[0]
+        const queryStart = originalUrl.indexOf('?')
+        const rawPath =
+          queryStart === -1 ? originalUrl : originalUrl.slice(0, queryStart)
         const relativePath = rawPath.slice(prefix.length) || '/'
-        const qs = originalUrl.includes('?')
-          ? originalUrl.slice(originalUrl.indexOf('?'))
-          : ''
+        const qs = queryStart === -1 ? '' : originalUrl.slice(queryStart)
         request.url = relativePath + qs
         request.resetParsedUrl()
 
-        const chain = [...allHandlers]
         const run = async (i: number): Promise<void> => {
-          if (i >= chain.length) {
+          if (i >= allHandlers.length) {
             request.url = originalUrl
             request.resetParsedUrl()
             return next()
           }
-          await chain[i]({ request, response, next: () => run(i + 1) })
+          await allHandlers[i]({ request, response, next: () => run(i + 1) })
         }
 
         await run(0)
@@ -660,14 +614,33 @@ class Hyperin {
     const lastHandler = handlers[handlers.length - 1]
     const normalizedHandlers =
       handlers.length > 0 && isRouteSchemaOptions(lastHandler)
-        ? [
-            ...buildRouteOptionHandlers(lastHandler),
-            ...(handlers.slice(0, -1) as Handler[])
-          ]
+        ? (() => {
+            const routeHandlers = handlers.slice(0, -1) as Handler[]
+            const optionHandlers = buildRouteOptionHandlers(lastHandler)
+
+            if (routeHandlers.length === 0) return optionHandlers
+
+            return [
+              ...routeHandlers.slice(0, -1),
+              ...optionHandlers,
+              routeHandlers[routeHandlers.length - 1]
+            ]
+          })()
         : (handlers as Handler[])
 
     this.#router.add(method, fullPath || '/', normalizedHandlers)
     return this
+  }
+
+  #writeHandlerResult(response: Response, result: unknown): void {
+    if (result === undefined || response.sent) return
+
+    if (typeof result === 'string') {
+      response.text(result)
+      return
+    }
+
+    response.json(result as object)
   }
 
   // ──────────────────────────────────────────────
@@ -689,7 +662,10 @@ class Hyperin {
 
     // Track in-flight count so shutdown() knows when it's safe to exit.
     this.#activeRequests++
+    const socket = rawRequest.socket as Socket & { _busy?: boolean }
+    socket._busy = true
     rawResponse.once('finish', () => {
+      socket._busy = false
       this.#activeRequests--
       if (this.#shuttingDown && this.#activeRequests === 0) {
         this.#drainResolve?.()
@@ -704,8 +680,8 @@ class Hyperin {
     }
 
     const rawUrl = request.url || '/'
-    const { path, query } = parseRequestTarget(rawUrl)
-    request.query = query
+    const { path, rawQuery } = parseRequestTarget(rawUrl)
+    request.setParsedTarget(path, rawQuery)
 
     const method = request.method || 'GET'
     const match = this.#router.match(method, path)
@@ -724,46 +700,43 @@ class Hyperin {
     const hLen = handlers.length
     const total = mLen + hLen
     let idx = 0
+    const context = {
+      request,
+      response,
+      next: undefined as unknown as () => Promise<void>
+    }
 
     const next = async (): Promise<void> => {
-      if (idx >= total) {
-        if (!match.matched && !response.sent) {
-          response.status(404).json({ error: 'Not Found', path, method })
+      while (idx < total) {
+        const handler = idx < mLen ? middlewares[idx++] : handlers[idx++ - mLen]
+
+        try {
+          const result = handler(context)
+
+          if (isPromiseLike(result)) {
+            try {
+              this.#writeHandlerResult(response, await result)
+            } catch (err) {
+              await this.#runErrorMiddlewares(err as Error, request, response)
+            }
+
+            return
+          }
+
+          this.#writeHandlerResult(response, result)
+          return
+        } catch (err) {
+          await this.#runErrorMiddlewares(err as Error, request, response)
+          return
         }
-        return
       }
 
-      const handler = idx < mLen ? middlewares[idx++] : handlers[idx++ - mLen]
-      try {
-        const result = handler({ request, response, next })
-
-        if (isPromiseLike(result)) {
-          return void (await result
-            .then((resolved) => {
-              if (resolved !== undefined && !response.sent) {
-                if (typeof resolved === 'string') {
-                  response.text(resolved)
-                } else {
-                  response.json(resolved as object)
-                }
-              }
-            })
-            .catch(async (err: unknown) => {
-              await this.#runErrorMiddlewares(err as Error, request, response)
-            }))
-        }
-
-        if (result !== undefined && !response.sent) {
-          if (typeof result === 'string') {
-            response.text(result)
-          } else {
-            response.json(result as object)
-          }
-        }
-      } catch (err) {
-        await this.#runErrorMiddlewares(err as Error, request, response)
+      if (!match.matched && !response.sent) {
+        response.status(404).json({ error: 'Not Found', path, method })
       }
     }
+
+    context.next = next
 
     await next()
   }
@@ -821,12 +794,6 @@ class Hyperin {
     this.#server.on(
       'request',
       async (request: IncomingMessage, response: ServerResponse) => {
-        const socket = request.socket as Socket & { _busy?: boolean }
-        socket._busy = true
-        response.once('finish', () => {
-          socket._busy = false
-        })
-
         await this.#dispatch(request, response).catch((err) => {
           console.error('[listen] uncaught dispatch error:', err)
 
@@ -970,6 +937,16 @@ class Hyperin {
 
 export type Instance = Application
 
+type RouteMethodName =
+  | 'get'
+  | 'post'
+  | 'put'
+  | 'patch'
+  | 'delete'
+  | 'head'
+  | 'options'
+  | 'all'
+
 export function hyperin(): Application {
   const core = new Hyperin()
 
@@ -998,6 +975,17 @@ export function hyperin(): Application {
     core.use(path)
   }
 
+  function createRouteMethod(
+    method: RouteMethodName
+  ): RouteMethod<Application> {
+    function register(path: string, ...handlers: unknown[]): Application {
+      ;(core[method] as (...args: unknown[]) => unknown)(path, ...handlers)
+      return app
+    }
+
+    return register as RouteMethod<Application>
+  }
+
   // O app é o próprio Server — assim supertest(app) funciona diretamente.
   // Métodos de rota e middleware são adicionados via Object.assign.
   const app = Object.assign(server, {
@@ -1014,43 +1002,19 @@ export function hyperin(): Application {
       return app
     },
     [HYPERIN_CORE]: core,
-    get: ((path: string, ...handlers: Handler[]) => {
-      ;(core.get as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
-    post: ((path: string, ...handlers: Handler[]) => {
-      ;(core.post as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
-    put: ((path: string, ...handlers: Handler[]) => {
-      ;(core.put as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
-    patch: ((path: string, ...handlers: Handler[]) => {
-      ;(core.patch as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
-    delete: ((path: string, ...handlers: Handler[]) => {
-      ;(core.delete as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
-    head: ((path: string, ...handlers: Handler[]) => {
-      ;(core.head as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
-    options: ((path: string, ...handlers: Handler[]) => {
-      ;(core.options as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
-    all: ((path: string, ...handlers: Handler[]) => {
-      ;(core.all as (...args: unknown[]) => unknown)(path, ...handlers)
-      return app
-    }) as unknown as RouteMethod<Application>,
+    get: createRouteMethod('get'),
+    post: createRouteMethod('post'),
+    put: createRouteMethod('put'),
+    patch: createRouteMethod('patch'),
+    delete: createRouteMethod('delete'),
+    head: createRouteMethod('head'),
+    options: createRouteMethod('options'),
+    all: createRouteMethod('all'),
     route: core.route.bind(core),
     shutdown: core.shutdown.bind(core),
     graceful: core.graceful.bind(core),
     handler: core.handler
-  })
+  }) as Application
 
   // listen() passa o hostname opcionalmente, mantendo a assinatura original.
   const serverListen = server.listen.bind(server)
