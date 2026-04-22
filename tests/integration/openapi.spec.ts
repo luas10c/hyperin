@@ -6,7 +6,7 @@ import request from 'supertest'
 
 import hyperin from '#/instance'
 import { json } from '#/middleware'
-import { openapi, clearOpenAPIRegistry } from '#/openapi'
+import { model, openapi, clearOpenAPIRegistry } from '#/openapi'
 
 function stringSchema() {
   return {
@@ -528,6 +528,174 @@ describe('OpenAPI integration', () => {
         password: { type: 'string', minLength: 8 }
       },
       required: ['email', 'password']
+    })
+  })
+
+  test('isolates route registry and options per app', async () => {
+    const appA = hyperin()
+    const appB = hyperin()
+
+    appA.get('/a', () => ({ ok: 'a' }), {
+      responses: {
+        200: {
+          description: 'ok'
+        }
+      }
+    })
+    appB.get('/b', () => ({ ok: 'b' }), {
+      responses: {
+        200: {
+          description: 'ok'
+        }
+      }
+    })
+
+    openapi(appA, {
+      documentation: {
+        info: {
+          title: 'App A',
+          version: '1.0.0'
+        }
+      }
+    })
+    openapi(appB, {
+      path: '/docs/openapi.json',
+      documentation: {
+        info: {
+          title: 'App B',
+          version: '2.0.0'
+        }
+      }
+    })
+
+    const responseA = await request(appA).get('/openapi.json')
+    const responseB = await request(appB).get('/docs/openapi.json')
+
+    expect(responseA.status).toBe(200)
+    expect(responseA.body.info).toEqual({ title: 'App A', version: '1.0.0' })
+    expect(responseA.body.paths['/a']).toBeDefined()
+    expect(responseA.body.paths['/b']).toBeUndefined()
+
+    expect(responseB.status).toBe(200)
+    expect(responseB.body.info).toEqual({ title: 'App B', version: '2.0.0' })
+    expect(responseB.body.paths['/b']).toBeDefined()
+    expect(responseB.body.paths['/a']).toBeUndefined()
+  })
+
+  test('isolates mapJsonSchema during concurrent document generation', async () => {
+    const appA = hyperin()
+    const appB = hyperin()
+    const schema = {
+      '~standard': {
+        version: 1 as const,
+        vendor: 'custom-vendor',
+        validate(value: unknown) {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return { issues: [{ message: 'Expected object' }] }
+          }
+
+          return { value }
+        }
+      }
+    }
+
+    appA.post('/', () => ({ ok: true }), { body: schema })
+    appB.post('/', () => ({ ok: true }), { body: schema })
+
+    openapi(appA, {
+      mapJsonSchema: {
+        'custom-vendor': () => ({
+          type: 'object',
+          properties: { email: { type: 'string' } },
+          required: ['email']
+        }) as Record<string, unknown>
+      }
+    })
+    openapi(appB, {
+      path: '/docs/openapi.json',
+      mapJsonSchema: {
+        'custom-vendor': () => ({
+          type: 'object',
+          properties: { age: { type: 'number' } },
+          required: ['age']
+        }) as Record<string, unknown>
+      }
+    })
+
+    const [responseA, responseB] = await Promise.all([
+      request(appA).get('/openapi.json'),
+      request(appB).get('/docs/openapi.json')
+    ])
+
+    expect(responseA.body.paths['/'].post.requestBody.content['application/json'].schema).toEqual({
+      type: 'object',
+      properties: { email: { type: 'string' } },
+      required: ['email']
+    })
+    expect(responseB.body.paths['/'].post.requestBody.content['application/json'].schema).toEqual({
+      type: 'object',
+      properties: { age: { type: 'number' } },
+      required: ['age']
+    })
+  })
+
+  test('isolates named models per app', async () => {
+    const appA = hyperin()
+    const appB = hyperin()
+
+    appA.use(
+      model({
+        User: {
+          type: 'object',
+          properties: { email: { type: 'string' } },
+          required: ['email']
+        }
+      })
+    )
+    appB.use(
+      model({
+        User: {
+          type: 'object',
+          properties: { age: { type: 'number' } },
+          required: ['age']
+        }
+      })
+    )
+
+    appA.get('/users', () => ({ ok: true }), {
+      responses: {
+        200: {
+          description: 'ok',
+          schema: 'User'
+        }
+      }
+    })
+    appB.get('/users', () => ({ ok: true }), {
+      responses: {
+        200: {
+          description: 'ok',
+          schema: 'User'
+        }
+      }
+    })
+
+    openapi(appA)
+    openapi(appB, { path: '/docs/openapi.json' })
+
+    const [responseA, responseB] = await Promise.all([
+      request(appA).get('/openapi.json'),
+      request(appB).get('/docs/openapi.json')
+    ])
+
+    expect(responseA.body.paths['/users'].get.responses['200'].content['application/json'].schema).toEqual({
+      type: 'object',
+      properties: { email: { type: 'string' } },
+      required: ['email']
+    })
+    expect(responseB.body.paths['/users'].get.responses['200'].content['application/json'].schema).toEqual({
+      type: 'object',
+      properties: { age: { type: 'number' } },
+      required: ['age']
     })
   })
 })

@@ -4,7 +4,9 @@ import request, { type Response } from 'supertest'
 import hyperin, { hyperin as createInstance } from '#/instance'
 
 type ErrorResponse = {
-  error: string
+  statusCode?: number
+  message?: string
+  error?: string
 }
 
 describe('Instance integration', () => {
@@ -80,6 +82,39 @@ describe('Instance integration', () => {
     expect(response.body).toEqual({ status: 'ok' })
   })
 
+  test('preserves request.url in scoped middleware', async () => {
+    const app = createInstance()
+
+    app.use('/welcome', ({ request, response }) => {
+      response.json({
+        url: request.url,
+        path: request.path,
+        query: request.query
+      })
+    })
+
+    const response: Response = await request(app).get('/welcome/admin?foo=bar')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      url: '/welcome/admin?foo=bar',
+      path: '/admin',
+      query: { foo: 'bar' }
+    })
+  })
+
+  test('shutdown closes the public server instance', async () => {
+    const app = createInstance()
+
+    app.get('/health', () => ({ ok: true }))
+
+    const server = app.listen(0)
+
+    await app.shutdown()
+
+    expect(server.listening).toBe(false)
+  })
+
   test('error middleware intercepts exceptions', async () => {
     const app = createInstance()
 
@@ -97,6 +132,65 @@ describe('Instance integration', () => {
     expect(response.body as ErrorResponse).toEqual({ error: 'kaboom' })
   })
 
+  test('error middleware can delegate back to framework with next(error)', async () => {
+    const app = createInstance()
+
+    app.use(async ({ error, next }) => {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      await next(error)
+    })
+
+    app.get('/boom', () => {
+      throw new Error('kaboom')
+    })
+
+    const response: Response = await request(app).get('/boom')
+
+    expect(response.status).toBe(500)
+    expect(response.body as ErrorResponse).toEqual({
+      statusCode: 500,
+      message: 'kaboom'
+    })
+  })
+
+  test('falls back to 500 when error middleware does not send a response', async () => {
+    const app = createInstance()
+
+    app.use(async ({ next }) => {
+      await next()
+    })
+
+    app.get('/boom', () => {
+      throw new Error('kaboom')
+    })
+
+    const response: Response = await request(app).get('/boom')
+
+    expect(response.status).toBe(500)
+    expect(response.body as ErrorResponse).toEqual({
+      statusCode: 500,
+      message: 'kaboom'
+    })
+  })
+
+  test('normal middleware can forward errors with next(error)', async () => {
+    const app = createInstance()
+
+    app.use(async ({ next }) => {
+      await next(new Error('blocked'))
+    })
+
+    app.get('/hello', () => 'ok')
+
+    const response: Response = await request(app).get('/hello')
+
+    expect(response.status).toBe(500)
+    expect(response.body as ErrorResponse).toEqual({
+      statusCode: 500,
+      message: 'blocked'
+    })
+  })
+
   test('returns 404 when route does not exist', async () => {
     const app = createInstance()
 
@@ -104,6 +198,6 @@ describe('Instance integration', () => {
     const body = response.body as ErrorResponse
 
     expect(response.status).toBe(404)
-    expect(body.error).toBe('Not Found')
+    expect(body).toEqual({ statusCode: 404, message: 'Not Found' })
   })
 })

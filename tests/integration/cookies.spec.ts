@@ -53,4 +53,19 @@ describe('cookies middleware', () => {
       'aaa=aaa; Path=/; HttpOnly'
     ])
   })
+
+  test('ignores unsafe cookie keys', async () => {
+    const app = hyperin()
+
+    app.use(cookies())
+    app.get('/me', ({ request }) => request.cookies)
+
+    const response: Response = await request(app)
+      .get('/me')
+      .set('Cookie', ['theme=dark', '__proto__=polluted', 'constructor=x'])
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ theme: 'dark' })
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
 })

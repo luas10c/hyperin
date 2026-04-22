@@ -52,4 +52,23 @@ describe('CORS middleware', () => {
     expect(response.status).toBe(200)
     expect(response.headers['access-control-allow-origin']).toBeUndefined()
   })
+
+  test('reflects request origin when credentials are enabled with wildcard origin', async () => {
+    const app = hyperin()
+    app.use(cors({ credentials: true }))
+    app.get('/resource', ({ response }) => {
+      response.send('ok')
+    })
+
+    const response: Response = await request(app)
+      .get('/resource')
+      .set('Origin', 'https://client.test')
+
+    expect(response.status).toBe(200)
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://client.test'
+    )
+    expect(response.headers['access-control-allow-credentials']).toBe('true')
+    expect(response.headers.vary).toBe('Origin')
+  })
 })

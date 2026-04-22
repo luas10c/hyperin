@@ -33,4 +33,18 @@ describe('Request integration', () => {
       contentType: 'application/json'
     })
   })
+
+  test('ignores unsafe query keys', async () => {
+    const app = hyperin()
+
+    app.get('/users', ({ request }) => request.query)
+
+    const response: Response = await request(app).get(
+      '/users?ok=1&__proto__=polluted&constructor=x&prototype=y'
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: '1' })
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
 })

@@ -148,4 +148,34 @@ describe('body parsers', () => {
       type: 'parameters.too.many'
     })
   })
+
+  test('urlencoded ignores unsafe keys in simple mode', async () => {
+    const app = hyperin()
+    app.use(urlencoded())
+    app.post('/form', ({ request }) => request.body as JsonObject)
+
+    const response: Response = await request(app)
+      .post('/form')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send('ok=1&__proto__=polluted&constructor=x')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: '1' })
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  test('urlencoded ignores unsafe keys in extended mode', async () => {
+    const app = hyperin()
+    app.use(urlencoded({ extended: true }))
+    app.post('/form', ({ request }) => request.body as JsonObject)
+
+    const response: Response = await request(app)
+      .post('/form')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send('user[name]=Ana&user[__proto__]=polluted&constructor[admin]=1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ user: { name: 'Ana' } })
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
 })

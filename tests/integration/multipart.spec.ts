@@ -98,4 +98,22 @@ describe('multipart middleware', () => {
       method: 'POST'
     })
   })
+
+  test('returns 413 when multipart body exceeds configured limit', async () => {
+    const app = hyperin()
+
+    app.use(multipart({ limits: { bodySize: 4 } }))
+    app.post('/upload', ({ request }) => request.body as Record<string, unknown>)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .field('title', 'hello')
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      statusCode: 413,
+      error: 'Payload Too Large',
+      method: 'POST'
+    })
+  })
 })

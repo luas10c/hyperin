@@ -55,7 +55,7 @@ describe('serveStatic middleware', () => {
     expect(response.status).toBe(404)
     expect(response.body as StaticErrorResponse).toEqual({
       statusCode: 404,
-      path: '/.env',
+      path: '/public/.env',
       message: 'Not Found'
     })
   })
@@ -76,5 +76,22 @@ describe('serveStatic middleware', () => {
     expect(first.status).toBe(200)
     expect(etag).toBeTruthy()
     expect(second.status).toBe(304)
+  })
+
+  test('returns 400 for malformed encoded path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hyperin-static-'))
+    writeFileSync(join(dir, 'hello.txt'), 'oi')
+
+    const app = hyperin()
+    app.use('/public', serveStatic(resolve(dir)))
+
+    const response: Response = await request(app).get('/public/%E0%A4%A')
+
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual({
+      statusCode: 400,
+      path: '/public/%E0%A4%A',
+      message: 'Bad Request'
+    })
   })
 })

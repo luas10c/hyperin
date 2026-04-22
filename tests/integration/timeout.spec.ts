@@ -56,4 +56,35 @@ describe('timeout middleware', () => {
     expect(response.status).toBe(200)
     expect(response.text).toBe('ok')
   })
+
+  test('exposes cooperative cancellation through request.signal', async () => {
+    const app = hyperin()
+    let completed = false
+
+    app.use(timeout({ delay: 20 }))
+    app.get('/slow', async ({ request }) => {
+      await new Promise<void>((resolve) => {
+        const timer = globalThis.setTimeout(() => {
+          completed = true
+          resolve()
+        }, 50)
+
+        request.signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer)
+            resolve()
+          },
+          { once: true }
+        )
+        })
+    })
+
+    const response: Response = await request(app).get('/slow')
+
+    await setTimeout(60)
+
+    expect(response.status).toBe(408)
+    expect(completed).toBe(false)
+  })
 })

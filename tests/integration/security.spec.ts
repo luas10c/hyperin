@@ -38,6 +38,21 @@ describe('security middleware', () => {
       .set('X-Forwarded-Proto', 'https')
 
     expect(response.status).toBe(200)
+    expect(response.headers['strict-transport-security']).toBeUndefined()
+  })
+
+  test('envia HSTS quando trust proxy está habilitado e o proxy informa https', async () => {
+    const app = hyperin()
+
+    app.enable('trust proxy')
+    app.use(security())
+    app.get('/secure', () => 'ok')
+
+    const response: Response = await request(app)
+      .get('/secure')
+      .set('X-Forwarded-Proto', 'https')
+
+    expect(response.status).toBe(200)
     expect(response.headers['strict-transport-security']).toBe(
       'max-age=15552000; includeSubDomains'
     )
