@@ -1,7 +1,8 @@
 import { stat } from 'node:fs/promises'
-import { resolve, join } from 'node:path'
-import { pipeFile } from '../util'
+import { resolve, join, relative, isAbsolute, sep } from 'node:path'
 import type { Stats } from 'node:fs'
+
+import { pipeFile } from '../util'
 
 import type { Request } from '../request'
 import type { Response } from '../response'
@@ -43,11 +44,14 @@ export function serveStatic(
     const urlPath = decodeURIComponent(request.path || '/')
 
     // Prevent path traversal
-    const filePath = resolve(join(directory, urlPath))
-    if (!filePath.startsWith(directory)) {
-      return void response
-        .status(403)
-        .json({ statusCode: 403, error: 'Forbidden', method: request.method })
+    const filePath = resolve(directory, '.' + sep + urlPath)
+    const rel = relative(directory, filePath)
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      return void response.status(403).json({
+        statusCode: 403,
+        path: request.url ?? '/',
+        message: 'Forbidden'
+      })
     }
 
     // Dotfiles
@@ -56,14 +60,18 @@ export function serveStatic(
       .some((s) => s.startsWith('.') && s.length > 1)
     if (hasDot) {
       if (dotfiles === 'deny') {
-        return void response
-          .status(403)
-          .json({ statusCode: 403, error: 'Forbidden', method: request.method })
+        return void response.status(403).json({
+          statusCode: 403,
+          path: request.url ?? '/',
+          message: 'Forbidden'
+        })
       }
       if (dotfiles === 'ignore') {
-        return void response
-          .status(404)
-          .json({ statusCode: 404, error: 'Not Found', method: request.method })
+        return void response.status(404).json({
+          statusCode: 404,
+          path: request.url ?? '/',
+          message: 'Not Found'
+        })
       }
     }
 
@@ -71,17 +79,21 @@ export function serveStatic(
     try {
       fileStat = await stat(filePath)
     } catch {
-      return void response
-        .status(404)
-        .json({ statusCode: 404, error: 'Not Found', method: request.method })
+      return void response.status(404).json({
+        statusCode: 404,
+        path: request.url ?? '/',
+        message: 'Not Found'
+      })
     }
 
     // Directory → attempts to serve index
     if (fileStat.isDirectory()) {
       if (!index) {
-        return void response
-          .status(404)
-          .json({ statusCode: 404, error: 'Not Found', method: request.method })
+        return void response.status(404).json({
+          statusCode: 404,
+          path: request.url ?? '/',
+          message: 'Not Found'
+        })
       }
       const indexFile = index === true ? 'index.html' : index
       const indexPath = join(filePath, indexFile)
@@ -89,9 +101,11 @@ export function serveStatic(
       try {
         indexStat = await stat(indexPath)
       } catch {
-        return void response
-          .status(404)
-          .json({ statusCode: 404, error: 'Not Found', method: request.method })
+        return void response.status(404).json({
+          statusCode: 404,
+          path: request.url ?? '/',
+          message: 'Not Found'
+        })
       }
 
       return void pipeFile(indexPath, indexStat, request, response, {
