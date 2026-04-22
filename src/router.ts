@@ -1,6 +1,29 @@
+import type { Request } from './request'
 import type { ErrorMiddleware, Handler } from './types'
 
 export type { ErrorMiddleware, Handler } from './types'
+
+// ─────────────────────────────────────────────────────────────
+// Error middleware marker
+// ─────────────────────────────────────────────────────────────
+
+/** Symbol used to mark a function as an error middleware. */
+export const ERROR_MIDDLEWARE_SYMBOL = Symbol.for('hyperin.errorMiddleware')
+
+/**
+ * Marks `fn` as an error middleware so it is routed to the error handler chain.
+ *
+ * @example
+ * app.use(errorMiddleware(({ error, request, response }) => {
+ *   response.status(500).json({ error: error.message })
+ * }))
+ */
+export function errorMiddleware<TRequest extends Request = Request>(
+  fn: ErrorMiddleware<TRequest>
+): ErrorMiddleware<TRequest> {
+  ;(fn as unknown as Record<symbol, boolean>)[ERROR_MIDDLEWARE_SYMBOL] = true
+  return fn
+}
 
 export type HttpMethod =
   | 'GET'
@@ -89,8 +112,15 @@ function forEachPathSegment(
   }
 }
 
-// Cache to avoid re-executing toString + regex in the same function
 const errorMwCache = new WeakMap<object, boolean>()
+const SOURCE_SCAN_LIMIT = 320
+
+function getSourceScanWindow(fn: Handler | ErrorMiddleware): string {
+  const source = fn.toString()
+  return source.length > SOURCE_SCAN_LIMIT
+    ? source.slice(0, SOURCE_SCAN_LIMIT)
+    : source
+}
 
 function detectDestructuredErrorParam(source: string): boolean | null {
   const parenIndex = source.indexOf('(')
@@ -106,30 +136,29 @@ function detectDestructuredErrorParam(source: string): boolean | null {
   return /\berror\b/.test(source.slice(index + 1, closingBraceIndex))
 }
 
-/**
- * Detects whether the function is an ErrorMiddleware by inspecting the first parameter.
- * It covers two patterns:
- *  1. Native destructuring:  ({ error, ... }) =>
- *  2. Compiled TS:      function(_a) { var error = _a.error  /  let { error } = _ref
- * Result cached in WeakMap — cost paid once per registered function.
- */
 function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
+  if (
+    (fn as unknown as Record<symbol, unknown>)[ERROR_MIDDLEWARE_SYMBOL] === true
+  ) {
+    return true
+  }
+
   const cached = errorMwCache.get(fn)
   if (cached !== undefined) return cached
 
-  const src = fn.toString()
-
-  // Pattern 1: native destructuring in the first parameter — ({ error, ... })
-  const destructured = detectDestructuredErrorParam(src)
-  if (destructured !== null) {
-    const result = destructured
-    errorMwCache.set(fn, result)
-    return result
+  const src = getSourceScanWindow(fn)
+  if (!src.includes('error')) {
+    errorMwCache.set(fn, false)
+    return false
   }
 
-  // Pattern 2: code compiled by TypeScript
-  //   function(_a) { var error = _a.error ... }
-  //   (_ref) => { let { error } = _ref ... }
+  const destructured = detectDestructuredErrorParam(src)
+
+  if (destructured !== null) {
+    errorMwCache.set(fn, destructured)
+    return destructured
+  }
+
   const result = /\b(?:var|let|const)\s+(?:\{[^}]*\berror\b|error\s*=)/.test(
     src
   )
@@ -151,6 +180,10 @@ export class RadixRouter {
 
   get errorMiddlewares() {
     return this._errorMiddlewares
+  }
+
+  get middlewaresList() {
+    return this.middlewares
   }
 
   use(middleware: Handler): void
@@ -220,6 +253,19 @@ export class RadixRouter {
       }
     }
 
+    // HEAD → GET fallback for static routes (auto-handles HEAD for any GET route)
+    if (method === 'HEAD') {
+      const getHandlers = this.staticRoutes.get('GET')?.get(path)
+      if (getHandlers) {
+        return {
+          handlers: getHandlers,
+          middlewares: this.middlewares,
+          params: {},
+          matched: true
+        }
+      }
+    }
+
     if (!this.hasDynamicRoutes) {
       if (this.middlewares.length > 0) {
         return {
@@ -237,7 +283,11 @@ export class RadixRouter {
 
     const routeHandlers = dynamicMatch?.node.isEnd
       ? dynamicMatch.node.handlers.get(method as HttpMethod) ||
-        dynamicMatch.node.handlers.get('ALL')
+        dynamicMatch.node.handlers.get('ALL') ||
+        // HEAD → GET fallback for dynamic routes
+        (method === 'HEAD'
+          ? (dynamicMatch.node.handlers.get('GET') ?? null)
+          : null)
       : null
 
     if (dynamicMatch && routeHandlers) {

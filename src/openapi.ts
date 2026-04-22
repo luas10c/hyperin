@@ -1,8 +1,7 @@
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 
-import type { Application } from './instance'
-import { RadixRouter } from './router'
+import type { Application, HttpMethod } from './instance'
 import type { Handler } from './types'
 
 export interface OpenAPISchema {
@@ -111,11 +110,15 @@ export interface OpenAPIOptions {
 
 type RequestSource = 'body' | 'params' | 'query'
 type OperationFragment = Partial<OpenAPIOperation>
+type OpenAPIConversionContext = {
+  options?: OpenAPIOptions
+  modelRegistry?: Map<string, OpenAPISchema>
+}
 type OperationMetadata =
   | OperationFragment
   | OpenAPIOperation
   | Promise<OperationFragment | OpenAPIOperation>
-  | (() =>
+  | ((context?: OpenAPIConversionContext) =>
       | OperationFragment
       | OpenAPIOperation
       | Promise<OperationFragment | OpenAPIOperation>)
@@ -148,20 +151,33 @@ type SchemaCapabilityAdapter = {
   capability: SchemaCapability
   resolve: (
     schema: StandardSchemaLike,
-    direction: SchemaDirection
+    direction: SchemaDirection,
+    context: OpenAPIConversionContext
   ) => OpenAPISchema | null
 }
 type OpenAPIPluginTarget = {
   use: Application['use']
 }
+type OpenAPIRegistryState = {
+  options: OpenAPIOptions
+  routeRegistry: Map<string, StoredRoute>
+  modelRegistry: Map<string, OpenAPISchema>
+  context: OpenAPIConversionContext
+}
+type OpenAPICoreLike = {
+  getRoutesSnapshot(): [HttpMethod, string, Handler[]][]
+  getMiddlewaresSnapshot(): Handler[]
+  onRouteRegistered(
+    observer: (method: HttpMethod, path: string, handlers: Handler[]) => void
+  ): () => void
+  onMiddlewareRegistered(observer: (middleware: Handler) => void): () => void
+}
 
-const routeRegistry = new Map<string, StoredRoute>()
-const modelRegistry = new Map<string, OpenAPISchema>()
-let currentOptions: OpenAPIOptions = {}
+const hyperinCoreKey = Symbol.for('hyperin.core')
 
 const operationMetadataKey = Symbol.for('hyperin.openapi.operation')
 const fragmentMetadataKey = Symbol.for('hyperin.openapi.fragment')
-const routerPatchedKey = Symbol.for('hyperin.openapi.router-patched')
+const modelMetadataKey = Symbol.for('hyperin.openapi.models')
 
 function normalizePath(path: string | undefined, fallback: string): string {
   if (!path || path === '') return fallback
@@ -193,12 +209,13 @@ async function acceptsUndefined(schema: unknown): Promise<boolean> {
 }
 
 function getMappedJsonSchema(
-  schema: StandardSchemaLike
+  schema: StandardSchemaLike,
+  context: OpenAPIConversionContext
 ): Record<string, unknown> | null {
   const vendor = schema['~standard']?.vendor
   if (!vendor) return null
 
-  const mapper = currentOptions.mapJsonSchema?.[vendor]
+  const mapper = context.options?.mapJsonSchema?.[vendor]
   if (!mapper) return null
 
   try {
@@ -810,8 +827,8 @@ const schemaCapabilityAdapters: SchemaCapabilityAdapter[] = [
   {
     name: 'mapped-json-schema',
     capability: 'jsonSchema',
-    resolve(schema) {
-      const jsonSchema = getMappedJsonSchema(schema)
+    resolve(schema, _direction, context) {
+      const jsonSchema = getMappedJsonSchema(schema, context)
       return jsonSchema ? jsonSchemaToOpenAPI(jsonSchema) : null
     }
   },
@@ -842,11 +859,12 @@ const schemaCapabilityAdapters: SchemaCapabilityAdapter[] = [
 
 export function schemaToOpenAPI(
   schema: unknown,
-  direction: SchemaDirection = 'input'
+  direction: SchemaDirection = 'input',
+  context: OpenAPIConversionContext = {}
 ): OpenAPISchema {
   if (typeof schema === 'string') {
-    return modelRegistry.has(schema)
-      ? cloneSchema(modelRegistry.get(schema) as OpenAPISchema)
+    return context.modelRegistry?.has(schema)
+      ? cloneSchema(context.modelRegistry.get(schema) as OpenAPISchema)
       : { type: 'string' }
   }
 
@@ -856,7 +874,7 @@ export function schemaToOpenAPI(
 
   if (isStandardSchemaLike(schema)) {
     for (const adapter of schemaCapabilityAdapters) {
-      const openapiSchema = adapter.resolve(schema, direction)
+      const openapiSchema = adapter.resolve(schema, direction, context)
       if (openapiSchema) return openapiSchema
     }
 
@@ -957,9 +975,10 @@ function buildParameters(
 
 export async function createOpenAPIOperationFragment(
   source: RequestSource,
-  schema: unknown
+  schema: unknown,
+  context: OpenAPIConversionContext = {}
 ): Promise<OperationFragment> {
-  const openapiSchema = schemaToOpenAPI(schema, 'input')
+  const openapiSchema = schemaToOpenAPI(schema, 'input', context)
 
   if (source === 'body') {
     return {
@@ -997,11 +1016,16 @@ function mergeUniqueTags(base: string[] = [], extra: string[] = []): string[] {
 }
 
 function normalizeHeader(
-  input: unknown | { schema: unknown; description?: string }
+  input: unknown | { schema: unknown; description?: string },
+  context: OpenAPIConversionContext
 ): OpenAPIHeader {
   if (input && typeof input === 'object' && 'schema' in input) {
     return {
-      schema: schemaToOpenAPI((input as { schema: unknown }).schema, 'output'),
+      schema: schemaToOpenAPI(
+        (input as { schema: unknown }).schema,
+        'output',
+        context
+      ),
       ...(typeof (input as { description?: unknown }).description === 'string'
         ? { description: (input as { description?: string }).description }
         : {})
@@ -1009,18 +1033,19 @@ function normalizeHeader(
   }
 
   return {
-    schema: schemaToOpenAPI(input, 'output')
+    schema: schemaToOpenAPI(input, 'output', context)
   }
 }
 
 function normalizeResponse(
-  response: DescribeOperationResponse | OpenAPIResponse
+  response: DescribeOperationResponse | OpenAPIResponse,
+  context: OpenAPIConversionContext
 ): OpenAPIResponse {
   const normalizedContent = response.content
     ? Object.fromEntries(
         Object.entries(response.content).map(([contentType, entry]) => [
           contentType,
-          { schema: schemaToOpenAPI(entry.schema, 'output') }
+          { schema: schemaToOpenAPI(entry.schema, 'output', context) }
         ])
       )
     : undefined
@@ -1029,7 +1054,7 @@ function normalizeResponse(
     ? Object.fromEntries(
         Object.entries(response.headers).map(([name, header]) => [
           name,
-          normalizeHeader(header)
+          normalizeHeader(header, context)
         ])
       )
     : undefined
@@ -1043,7 +1068,7 @@ function normalizeResponse(
       content: {
         ...(normalizedContent ?? {}),
         [contentType]: {
-          schema: schemaToOpenAPI(response.schema, 'output')
+          schema: schemaToOpenAPI(response.schema, 'output', context)
         }
       }
     }
@@ -1057,7 +1082,8 @@ function normalizeResponse(
 }
 
 function normalizeOperation(
-  operation: DescribeOperationInput | OpenAPIOperation
+  operation: DescribeOperationInput | OpenAPIOperation,
+  context: OpenAPIConversionContext
 ): OpenAPIOperation {
   const rawDetail = 'detail' in operation ? operation.detail : undefined
   const response = 'response' in operation ? operation.response : undefined
@@ -1082,7 +1108,7 @@ function normalizeOperation(
             Object.entries(operation.responses ?? response ?? {}).map(
               ([status, responseItem]) => [
                 status,
-                normalizeResponse(responseItem)
+                normalizeResponse(responseItem, context)
               ]
             )
           )
@@ -1175,16 +1201,13 @@ export function describeOperation(operation: DescribeOperationInput): Handler {
   return setHandlerMetadata(
     async ({ next }) => next(),
     operationMetadataKey,
-    normalizeOperation(operation)
+    (context?: OpenAPIConversionContext) =>
+      normalizeOperation(operation, context ?? {})
   )
 }
 
 export function model(models: Record<string, unknown>): Handler {
-  for (const [name, schema] of Object.entries(models)) {
-    modelRegistry.set(name, schemaToOpenAPI(schema, 'output'))
-  }
-
-  return async ({ next }) => next()
+  return setHandlerMetadata(async ({ next }) => next(), modelMetadataKey, models)
 }
 
 export function withHeader(
@@ -1205,14 +1228,15 @@ function routeKey(method: string, path: string): string {
 }
 
 function recordOperation(
+  state: OpenAPIRegistryState,
   method: string,
   path: string,
   operation: OpenAPIOperation
 ): void {
   const key = routeKey(method, path)
-  const current = routeRegistry.get(key)
+  const current = state.routeRegistry.get(key)
 
-  routeRegistry.set(key, {
+  state.routeRegistry.set(key, {
     method: method.toUpperCase(),
     path,
     operation: mergeOperation(current?.operation, operation),
@@ -1225,16 +1249,17 @@ function cloneSchema(schema: OpenAPISchema): OpenAPISchema {
 }
 
 async function extractHandlerOperation(
-  handler: Handler
+  handler: Handler,
+  context: OpenAPIConversionContext
 ): Promise<OperationFragment> {
   const metadata = handler as unknown as Record<symbol, unknown>
   const operationValue = metadata[operationMetadataKey]
   const fragmentValue = metadata[fragmentMetadataKey]
   const operation = (await (typeof operationValue === 'function'
-    ? operationValue()
+    ? operationValue(context)
     : operationValue)) as OpenAPIOperation | undefined
   const fragment = (await (typeof fragmentValue === 'function'
-    ? fragmentValue()
+    ? fragmentValue(context)
     : fragmentValue)) as OperationFragment | undefined
 
   if (operation && fragment) {
@@ -1244,15 +1269,29 @@ async function extractHandlerOperation(
   return operation ?? fragment ?? {}
 }
 
+function registerModelsFromHandler(
+  state: OpenAPIRegistryState,
+  handler: Handler
+): void {
+  const metadata = handler as unknown as Record<symbol, unknown>
+  const models = metadata[modelMetadataKey] as Record<string, unknown> | undefined
+  if (!models) return
+
+  for (const [name, schema] of Object.entries(models)) {
+    state.modelRegistry.set(name, schemaToOpenAPI(schema, 'output', state.context))
+  }
+}
+
 function recordRouteFromHandlers(
+  state: OpenAPIRegistryState,
   method: string,
   path: string,
   handlers: Handler[]
 ): void {
   const key = routeKey(method, path)
-  const current = routeRegistry.get(key)
+  const current = state.routeRegistry.get(key)
 
-  routeRegistry.set(key, {
+  state.routeRegistry.set(key, {
     method: method.toUpperCase(),
     path,
     operation: current?.operation,
@@ -1260,26 +1299,14 @@ function recordRouteFromHandlers(
   })
 }
 
-function patchRouter(): void {
-  if ((globalThis as Record<symbol, unknown>)[routerPatchedKey]) return
-
-  const originalAdd = RadixRouter.prototype.add
-  RadixRouter.prototype.add = function patchedAdd(method, path, handlers) {
-    recordRouteFromHandlers(method, path, handlers)
-    originalAdd.call(this, method, path, handlers)
-  }
-  ;(globalThis as Record<symbol, unknown>)[routerPatchedKey] = true
-}
-
-patchRouter()
-
 async function resolveRouteOperation(
-  route: StoredRoute
+  route: StoredRoute,
+  context: OpenAPIConversionContext
 ): Promise<OpenAPIOperation | undefined> {
   let operation = route.operation
 
   for (const handler of route.handlers ?? []) {
-    const fragment = await extractHandlerOperation(handler)
+    const fragment = await extractHandlerOperation(handler, context)
     if (Object.keys(fragment).length === 0) continue
     operation = mergeOperation(operation, fragment)
   }
@@ -1287,11 +1314,18 @@ async function resolveRouteOperation(
   return operation
 }
 
-export async function getOpenAPIDocument(): Promise<OpenAPIDocument> {
+export async function getOpenAPIDocument(
+  state: OpenAPIRegistryState = {
+    options: {},
+    routeRegistry: new Map<string, StoredRoute>(),
+    modelRegistry: new Map<string, OpenAPISchema>(),
+    context: {}
+  }
+): Promise<OpenAPIDocument> {
   const paths: OpenAPIDocument['paths'] = {}
 
-  for (const route of routeRegistry.values()) {
-    const operation = await resolveRouteOperation(route)
+  for (const route of state.routeRegistry.values()) {
+    const operation = await resolveRouteOperation(route, state.context)
     if (!operation) continue
 
     const pathItem = (paths[route.path] ??= {})
@@ -1302,22 +1336,21 @@ export async function getOpenAPIDocument(): Promise<OpenAPIDocument> {
     $schema: 'https://spec.openapis.org/oas/3.1/schema-base/2025-09-15',
     openapi: '3.1.1',
     info: {
-      title: currentOptions.documentation?.info?.title ?? 'API Reference',
-      version: currentOptions.documentation?.info?.version ?? '1.0.0',
-      ...(currentOptions.documentation?.info?.description
-        ? { description: currentOptions.documentation.info.description }
+      title: state.options.documentation?.info?.title ?? 'API Reference',
+      version: state.options.documentation?.info?.version ?? '1.0.0',
+      ...(state.options.documentation?.info?.description
+        ? { description: state.options.documentation.info.description }
         : {})
     },
-    ...(currentOptions.documentation?.servers
-      ? { servers: currentOptions.documentation.servers }
+    ...(state.options.documentation?.servers
+      ? { servers: state.options.documentation.servers }
       : {}),
     paths
   }
 }
 
 export function clearOpenAPIRegistry(): void {
-  routeRegistry.clear()
-  modelRegistry.clear()
+  // Kept for backward compatibility. OpenAPI state is now isolated per app.
 }
 
 async function writeOpenAPIFile(
@@ -1359,17 +1392,78 @@ async function loadOrCreateOpenAPIFile(file: string): Promise<OpenAPIDocument> {
   return document
 }
 
-function createOpenAPIMiddleware(options: OpenAPIOptions = {}): Handler {
-  currentOptions = options
+function getOpenAPICore(app: OpenAPIPluginTarget): OpenAPICoreLike | null {
+  const core = Reflect.get(app as object, hyperinCoreKey) as unknown
+
+  if (!core || typeof core !== 'object') return null
+
+  const candidate = core as Partial<OpenAPICoreLike>
+  if (
+    typeof candidate.getRoutesSnapshot !== 'function' ||
+    typeof candidate.onRouteRegistered !== 'function' ||
+    typeof candidate.getMiddlewaresSnapshot !== 'function' ||
+    typeof candidate.onMiddlewareRegistered !== 'function'
+  ) {
+    return null
+  }
+
+  return candidate as OpenAPICoreLike
+}
+
+function createOpenAPIMiddleware(
+  app: OpenAPIPluginTarget,
+  options: OpenAPIOptions = {}
+): Handler {
   const specPath = normalizePath(options.path, '/openapi.json')
   const filePath = options.file ? resolveOpenAPIFilePath(options.file) : null
   let persistedDocumentPromise: Promise<OpenAPIDocument> | null = null
+  let cachedDocumentPromise: Promise<OpenAPIDocument> | null = null
+  const state: OpenAPIRegistryState = {
+    options,
+    routeRegistry: new Map<string, StoredRoute>(),
+    modelRegistry: new Map<string, OpenAPISchema>(),
+    context: { options }
+  }
+  state.context.modelRegistry = state.modelRegistry
+  const core = getOpenAPICore(app)
+  const invalidateDocument = (): void => {
+    cachedDocumentPromise = null
+    persistedDocumentPromise = null
+  }
+
+  if (core) {
+    for (const middleware of core.getMiddlewaresSnapshot()) {
+      registerModelsFromHandler(state, middleware)
+    }
+
+    for (const [method, path, handlers] of core.getRoutesSnapshot()) {
+      recordRouteFromHandlers(state, method, path, handlers)
+    }
+
+    core.onRouteRegistered((method, path, handlers) => {
+      recordRouteFromHandlers(state, method, path, handlers)
+      invalidateDocument()
+    })
+
+    core.onMiddlewareRegistered((middleware) => {
+      registerModelsFromHandler(state, middleware)
+      invalidateDocument()
+    })
+  }
 
   return async ({ request, response, next }) => {
     if (request.path === specPath) {
       const document = filePath
-        ? await (persistedDocumentPromise ??= loadOrCreateOpenAPIFile(filePath))
-        : await getOpenAPIDocument()
+        ? await (persistedDocumentPromise ??= (async () => {
+            if (await fileExists(filePath)) {
+              return loadOpenAPIFile(filePath)
+            }
+
+            const document = await getOpenAPIDocument(state)
+            await writeOpenAPIFile(filePath, document)
+            return document
+          })())
+        : await (cachedDocumentPromise ??= getOpenAPIDocument(state))
 
       response.json(document)
       return
@@ -1380,7 +1474,8 @@ function createOpenAPIMiddleware(options: OpenAPIOptions = {}): Handler {
     const operation = request.locals.openapi as OpenAPIOperation | undefined
     if (!operation || !request.method) return
 
-    recordOperation(request.method, request.path, operation)
+    recordOperation(state, request.method, request.path, operation)
+    invalidateDocument()
   }
 }
 
@@ -1389,7 +1484,7 @@ export function openapi<TApp extends OpenAPIPluginTarget>(
   options: OpenAPIOptions = {}
 ): TApp {
   ;(app.use as unknown as (handler: Handler) => unknown)(
-    createOpenAPIMiddleware(options)
+    createOpenAPIMiddleware(app, options)
   )
   return app
 }

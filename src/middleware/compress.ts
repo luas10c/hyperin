@@ -9,18 +9,9 @@ import {
   type ZlibOptions
 } from 'node:zlib'
 
-import type { Request } from '../request'
-import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type MiddlewareContext = {
-  request: Request
-  response: Response
-  next: NextFunction
-}
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import type { Request } from '#/request'
+import type { Response } from '#/response'
+import type { Middleware } from '#/types'
 
 type CompressionEncoding = 'br' | 'gzip' | 'deflate'
 
@@ -168,6 +159,14 @@ function toBuffer(chunk: Buffer | string, encoding?: BufferEncoding): Buffer {
   return encoding ? Buffer.from(chunk, encoding) : Buffer.from(chunk)
 }
 
+function normalizeContentTypeHeader(
+  contentType: number | string | string[] | readonly string[] | undefined
+): string | undefined {
+  if (Array.isArray(contentType)) return contentType[0]
+  if (typeof contentType === 'number') return String(contentType)
+  return typeof contentType === 'string' ? contentType : undefined
+}
+
 export function compress(options: CompressOptions = {}): Middleware {
   const threshold = options.threshold ?? 1024
   const supportedEncodings = options.encodings ?? DEFAULT_ENCODINGS
@@ -191,6 +190,29 @@ export function compress(options: CompressOptions = {}): Middleware {
     let compressionStream: CompressionStream | null = null
     let started = false
     let passthrough = false
+
+    const canBypassCompression = (finalChunkLength?: number): boolean => {
+      if (shouldSkipCompression(request, response)) return true
+      if (response.headersSent) return true
+
+      const normalizedType = normalizeContentTypeHeader(
+        response.getHeader('Content-Type')
+      )
+
+      if (!filter(normalizedType, request, response)) return true
+
+      const contentLength = parseContentLength(
+        response.getHeader('Content-Length') as
+          | number
+          | string
+          | string[]
+          | undefined
+      )
+
+      if (contentLength !== null) return contentLength < threshold
+      if (finalChunkLength !== undefined) return finalChunkLength < threshold
+      return false
+    }
 
     const flushBufferedPassthrough = (): void => {
       if (buffered.length === 0) return
@@ -227,12 +249,9 @@ export function compress(options: CompressOptions = {}): Middleware {
       if (shouldSkipCompression(request, response)) return false
       if (response.headersSent) return false
 
-      const contentType = response.getHeader('Content-Type')
-      const normalizedType = Array.isArray(contentType)
-        ? contentType[0]
-        : typeof contentType === 'number'
-          ? String(contentType)
-          : contentType
+      const normalizedType = normalizeContentTypeHeader(
+        response.getHeader('Content-Type')
+      )
 
       if (!filter(normalizedType, request, response)) return false
 
@@ -297,6 +316,23 @@ export function compress(options: CompressOptions = {}): Middleware {
       } else if (typeof encoding === 'function') {
         cb = encoding
         encoding = undefined
+      }
+
+      const endBuffer =
+        chunk !== undefined ? toBuffer(chunk, encoding as BufferEncoding) : null
+
+      if (
+        !passthrough &&
+        !compressionStream &&
+        bufferedLength === 0 &&
+        canBypassCompression(endBuffer?.length)
+      ) {
+        if (chunk === undefined) {
+          return cb ? originalEnd(cb) : originalEnd()
+        }
+
+        if (encoding) return cb ? originalEnd(chunk, encoding, cb) : originalEnd(chunk, encoding)
+        return cb ? originalEnd(chunk, cb) : originalEnd(chunk)
       }
 
       if (chunk !== undefined) {

@@ -1,15 +1,6 @@
-import type { Request } from '../request'
-import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type MiddlewareContext = {
-  request: Request
-  response: Response
-  next: NextFunction
-}
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import type { Request } from '#/request'
+import type { Response } from '#/response'
+import type { Middleware } from '#/types'
 
 export interface TimeoutOptions {
   delay?: number
@@ -24,12 +15,14 @@ export function timeout(options: TimeoutOptions = {}): Middleware {
   const statusCode = options.statusCode ?? 408
   const message = options.message ?? { error: 'Request Timeout' }
 
-  return async ({ request, response, next }) => {
-    if (options.skip?.(request, response)) {
-      return void (await next())
-    }
+    return async ({ request, response, next }) => {
+      if (options.skip?.(request, response)) {
+        return void (await next())
+      }
 
-    let timedOut = false
+      request.locals.abortSignal = request.signal
+
+      let timedOut = false
 
     const clear = () => {
       clearTimeout(timer)
@@ -37,13 +30,15 @@ export function timeout(options: TimeoutOptions = {}): Middleware {
       response.off('close', clear)
     }
 
-    const timer = setTimeout(async () => {
-      if (response.sent || response.writableEnded) return
+      const timer = setTimeout(async () => {
+        if (response.sent || response.writableEnded) return
 
-      timedOut = true
-      clear()
+        timedOut = true
+        clear()
+        request.locals.timeout = true
+        request.abort(new Error('Request Timeout'))
 
-      response.setHeader('Connection', 'close')
+        response.setHeader('Connection', 'close')
 
       if (options.onTimeout) {
         await options.onTimeout(request, response)

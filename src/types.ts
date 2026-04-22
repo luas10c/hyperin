@@ -3,7 +3,7 @@ import type { ParsedUrlQuery } from 'node:querystring'
 import type { AnyRequest, Request } from './request'
 import type { Response } from './response'
 
-export type NextFunction = () => void | Promise<void>
+export type NextFunction = (error?: Error) => void | Promise<void>
 
 export type HandlerReturn =
   | void
@@ -18,6 +18,10 @@ export type HandlerContext<TRequest extends Request = Request> = {
   response: Response
   next: NextFunction
 }
+
+export type Middleware = (
+  ctx: HandlerContext & { next: NextFunction }
+) => void | Promise<void>
 
 export type ErrorContext<TRequest extends Request = Request> =
   HandlerContext<TRequest> & {
@@ -249,3 +253,12 @@ export type RouteMethodArgsWithOptions<
       : never
     : never
   : never
+
+export type MultipartLimits = {
+  bodySize?: number
+  fileSize?: number
+  fieldSize?: number
+  files?: number
+  fields?: number
+  parts?: number
+}

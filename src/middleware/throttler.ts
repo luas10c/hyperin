@@ -1,15 +1,6 @@
 import type { Request } from '../request'
 import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type MiddlewareContext = {
-  request: Request
-  response: Response
-  next: NextFunction
-}
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import type { Middleware } from '#/types'
 
 export type RateLimitAlgorithm = 'fixed-window' | 'token-bucket'
 
@@ -78,15 +69,42 @@ function formatRateLimitPolicy(options: RateLimitStoreOptions): string {
 export class MemoryRateLimitStore implements RateLimitStore {
   #fixedWindowEntries = new Map<string, FixedWindowEntry>()
   #tokenBucketEntries = new Map<string, TokenBucketEntry>()
+  #sweepCountdown = 0
 
   consume(key: string, options: RateLimitStoreOptions): RateLimitResult {
     const now = Date.now()
+    this.#scheduleSweep(now, options)
 
     if (options.algorithm === 'token-bucket') {
       return this.#consumeTokenBucket(key, options, now)
     }
 
     return this.#consumeFixedWindow(key, options, now)
+  }
+
+  #scheduleSweep(now: number, options: RateLimitStoreOptions): void {
+    this.#sweepCountdown++
+    if (this.#sweepCountdown < 1024) return
+
+    this.#sweepCountdown = 0
+
+    for (const [key, entry] of this.#fixedWindowEntries) {
+      if (entry.resetAt <= now) {
+        this.#fixedWindowEntries.delete(key)
+      }
+    }
+
+    if (options.algorithm !== 'token-bucket') return
+
+    for (const [key, entry] of this.#tokenBucketEntries) {
+      const elapsed = now - entry.lastRefillAt
+      const refillPerMs = options.limit / options.windowMs
+      const tokens = Math.min(options.limit, entry.tokens + elapsed * refillPerMs)
+
+      if (tokens >= options.limit) {
+        this.#tokenBucketEntries.delete(key)
+      }
+    }
   }
 
   #consumeFixedWindow(

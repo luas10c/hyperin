@@ -47,7 +47,7 @@ export class Response extends ServerResponse<Request> {
 
   /** Calculates byte length, avoiding Buffer.byteLength when only ASCII data is present. */
   #byteLength(str: string): number {
-    // Fast path: ASCII puro — byte length === char length
+    if (str.length > 256) return Buffer.byteLength(str, 'utf8')
     for (let i = 0; i < str.length; i++) {
       if (str.charCodeAt(i) > 127) return Buffer.byteLength(str, 'utf8')
     }

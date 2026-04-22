@@ -1,6 +1,6 @@
 import type { AnyRequest, Request } from './request'
-import type { Response } from './response'
 import type {
+  Middleware,
   InferSchemaOutput,
   StandardSchemaV1,
   StandardSchemaV1Result,
@@ -10,13 +10,6 @@ import {
   attachOpenAPIFragmentMetadata,
   createOpenAPIOperationFragment
 } from './openapi'
-
-type NextFunction = () => void | Promise<void>
-type Middleware = (ctx: {
-  request: Request
-  response: Response
-  next: NextFunction
-}) => void | Promise<void>
 
 type SchemaInput = StandardSchemaV1 | unknown
 type RequestSource = 'body' | 'params' | 'query'
@@ -132,7 +125,7 @@ function createValidator(
 
   return attachOpenAPIFragmentMetadata(
     middleware as unknown as TypedMiddleware,
-    () => createOpenAPIOperationFragment(source, schema)
+    (context) => createOpenAPIOperationFragment(source, schema, context)
   ) as unknown as Middleware
 }
 

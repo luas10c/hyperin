@@ -1,16 +1,4 @@
-import type { Request } from '../request'
-import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type HandlerContext = {
-  request: Request
-  response: Response
-}
-
-type MiddlewareContext = HandlerContext & { next: NextFunction }
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import type { Middleware } from '#/types'
 
 export interface CorsOptions {
   /**
@@ -49,6 +37,22 @@ const DEFAULT_CORS: Required<CorsOptions> = {
   maxAge: 0,
   preflightContinue: false,
   optionsSuccessStatus: 204
+}
+
+function appendVary(
+  current: number | string | string[] | readonly string[] | undefined,
+  value: string
+): string {
+  if (current === undefined) return value
+
+  const source = Array.isArray(current) ? current.join(', ') : String(current)
+  const normalizedValue = value.toLowerCase()
+
+  for (const part of source.split(',')) {
+    if (part.trim().toLowerCase() === normalizedValue) return source
+  }
+
+  return `${source}, ${value}`
 }
 
 // Normalize string|string[] to string
@@ -113,6 +117,16 @@ function resolveOrigin(
   })
 }
 
+function resolveAllowedOrigin(
+  allowOrigin: string | false,
+  reqOrigin: string | undefined,
+  credentials: boolean
+): string | false {
+  if (allowOrigin === false) return false
+  if (!credentials || allowOrigin !== '*') return allowOrigin
+  return reqOrigin || false
+}
+
 export function cors(options: CorsOptions = {}): Middleware {
   const cfg = { ...DEFAULT_CORS, ...options }
 
@@ -120,7 +134,11 @@ export function cors(options: CorsOptions = {}): Middleware {
     const reqOrigin = request.headers['origin'] as string | undefined
     const methods = toHeaderValue(cfg.methods)
 
-    const allowOrigin = await resolveOrigin(cfg.origin, reqOrigin)
+    const allowOrigin = resolveAllowedOrigin(
+      await resolveOrigin(cfg.origin, reqOrigin),
+      reqOrigin,
+      cfg.credentials
+    )
 
     // ── Preflight (OPTIONS) ────────────────────────────────────
     if (request.method === 'OPTIONS') {
@@ -134,7 +152,10 @@ export function cors(options: CorsOptions = {}): Middleware {
 
       // Vary: Origin whenever not '*'
       if (allowOrigin !== '*') {
-        response.header('Vary', 'Origin')
+        response.header(
+          'Vary',
+          appendVary(response.getHeader('Vary'), 'Origin')
+        )
       }
 
       if (cfg.credentials) {
@@ -157,9 +178,7 @@ export function cors(options: CorsOptions = {}): Middleware {
           const vary = response.getHeader('Vary')
           response.header(
             'Vary',
-            vary
-              ? `${vary}, Access-Control-Request-Headers`
-              : 'Access-Control-Request-Headers'
+            appendVary(vary, 'Access-Control-Request-Headers')
           )
         }
       }
@@ -183,7 +202,7 @@ export function cors(options: CorsOptions = {}): Middleware {
     response.header('Access-Control-Allow-Origin', allowOrigin)
 
     if (allowOrigin !== '*') {
-      response.header('Vary', 'Origin')
+      response.header('Vary', appendVary(response.getHeader('Vary'), 'Origin'))
     }
 
     if (cfg.credentials) {

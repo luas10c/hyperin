@@ -1,17 +1,8 @@
 import { hrtime } from 'node:process'
 
-import type { Request } from '../request'
-import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type MiddlewareContext = {
-  request: Request
-  response: Response
-  next: NextFunction
-}
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import type { Request } from '#/request'
+import type { Response } from '#/response'
+import type { Middleware } from '#/types'
 
 export interface LoggerInfo {
   method: string
@@ -127,6 +118,7 @@ export function logger(options: LoggerOptions = {}): Middleware {
     }
 
     const startedAt = hrtime.bigint()
+    const initialBytesWritten = response.socket?.bytesWritten ?? 0
 
     const writeLog = () => {
       const info: LoggerInfo = {
@@ -134,7 +126,10 @@ export function logger(options: LoggerOptions = {}): Middleware {
         path: request.path,
         statusCode: response.statusCode,
         durationMs: Number(hrtime.bigint() - startedAt) / 1_000_000,
-        bytesWritten: response.socket?.bytesWritten ?? 0,
+        bytesWritten: Math.max(
+          0,
+          (response.socket?.bytesWritten ?? 0) - initialBytesWritten
+        ),
         ipAddress: request.ipAddress
       }
 

@@ -8,7 +8,7 @@ import type { Socket } from 'node:net'
 
 import { Request } from './request'
 import { Response } from './response'
-import { RadixRouter } from './router'
+import { errorMiddleware, RadixRouter } from './router'
 import { validate } from './validation'
 import { describeOperation } from './openapi'
 import type { DescribeOperationInput } from './openapi'
@@ -23,7 +23,7 @@ import type {
   TypedMiddleware
 } from './types'
 
-const HYPERIN_CORE = Symbol.for('hyperin.core')
+export const HYPERIN_CORE = Symbol.for('hyperin.core')
 
 export type HttpMethod =
   | 'GET'
@@ -72,6 +72,13 @@ interface RouteChain {
   patch(...handlers: Handler[]): RouteChain
   delete(...handlers: Handler[]): RouteChain
 }
+
+type RouteObserver = (
+  method: HttpMethod,
+  path: string,
+  handlers: Handler[]
+) => void
+type MiddlewareObserver = (middleware: Handler) => void
 
 type RouteMiddleware<TRequest extends Request> = TypedMiddleware<
   TRequest,
@@ -299,9 +306,11 @@ interface RouteMethod<TSelf> {
 export interface Application extends Server<typeof Request, typeof Response> {
   use: {
     (path: string, ...handlers: Handler[]): void
+    (handler: Handler): void
     (handler: ErrorMiddleware): void
   }
   disable: (setting: AppSetting) => Application
+  enable: (setting: AppSetting) => Application
   mount: (
     prefix: string,
     mounted: Hyperin | Application | { [HYPERIN_CORE]?: Hyperin }
@@ -421,6 +430,7 @@ function buildRouteOptionHandlers(options: RouteSchemaOptions): Handler[] {
 class Hyperin {
   #router: RadixRouter
   #server: Server | null = null
+  #boundServer: Server | null = null
   #prefix: string
 
   // ── Graceful shutdown state ──────────────────────────────────
@@ -435,6 +445,8 @@ class Hyperin {
   #drainResolve: (() => void) | null = null
   // Signal handlers registered by graceful(), kept for cleanup.
   #signalHandlers: Array<{ signal: NodeJS.Signals; handler: () => void }> = []
+  #routeObservers = new Set<RouteObserver>()
+  #middlewareObservers = new Set<MiddlewareObserver>()
   #xPoweredByEnabled = true
   // If true, trust X-Forwarded-* headers from reverse proxies
   #trustProxyEnabled = false
@@ -453,8 +465,11 @@ class Hyperin {
   use(path: string, ...handlers: Handler[]): this
   use(path: string | Handler | ErrorMiddleware, ...handlers: Handler[]): this {
     if (typeof path === 'function') {
-      // If it comes without ErrorMiddleware(), try a safe fallback based on rarity type.
+      const middlewareCount = this.#router.middlewaresList.length
       this.#router.use(path as Handler)
+      if (this.#router.middlewaresList.length > middlewareCount) {
+        this.#notifyMiddlewareObservers(path as Handler)
+      }
       for (const h of handlers) this.#router.use(h)
     } else {
       const prefix = path.endsWith('/') ? path.slice(0, -1) : path
@@ -465,29 +480,39 @@ class Hyperin {
         const queryStart = originalUrl.indexOf('?')
         const rawPath =
           queryStart === -1 ? originalUrl : originalUrl.slice(0, queryStart)
+
+        const matchesPrefix =
+          prefix === '' ||
+          rawPath === prefix ||
+          rawPath.startsWith(prefix + '/')
+
+        if (!matchesPrefix) return next()
+
         const relativePath = rawPath.slice(prefix.length) || '/'
-        const qs = queryStart === -1 ? '' : originalUrl.slice(queryStart)
-        request.url = relativePath + qs
-        request.resetParsedUrl()
+        const relativeQuery =
+          queryStart === -1 ? null : originalUrl.slice(queryStart + 1)
+        request.setParsedTarget(relativePath, relativeQuery)
 
         const run = async (i: number): Promise<void> => {
           if (i >= allHandlers.length) {
-            request.url = originalUrl
-            request.resetParsedUrl()
+            request.setParsedTarget(
+              rawPath,
+              queryStart === -1 ? null : originalUrl.slice(queryStart + 1)
+            )
             return next()
           }
           await allHandlers[i]({ request, response, next: () => run(i + 1) })
         }
 
         await run(0)
-        request.url = originalUrl
-        request.resetParsedUrl()
+        request.setParsedTarget(
+          rawPath,
+          queryStart === -1 ? null : originalUrl.slice(queryStart + 1)
+        )
       }
 
-      this.#addRoute('GET', prefix, [scoped])
-      this.#addRoute('GET', `${prefix}/*`, [scoped])
-      this.#addRoute('HEAD', prefix, [scoped])
-      this.#addRoute('HEAD', `${prefix}/*`, [scoped])
+      this.#router.use(scoped as Handler)
+      this.#notifyMiddlewareObservers(scoped)
     }
 
     return this
@@ -591,7 +616,9 @@ class Hyperin {
     }
 
     for (const [method, path, handlers] of target.#getRoutes()) {
-      this.#router.add(method, prefix + path, handlers)
+      const fullPath = prefix + path
+      this.#router.add(method, fullPath, handlers)
+      this.#notifyRouteObservers(method, fullPath, handlers)
     }
     return this
   }
@@ -620,6 +647,40 @@ class Hyperin {
     return this.#router.routes
   }
 
+  getRoutesSnapshot(): [HttpMethod, string, Handler[]][] {
+    return [...this.#router.routes]
+  }
+
+  onRouteRegistered(observer: RouteObserver): () => void {
+    this.#routeObservers.add(observer)
+    return () => this.#routeObservers.delete(observer)
+  }
+
+  getMiddlewaresSnapshot(): Handler[] {
+    return [...this.#router.middlewaresList]
+  }
+
+  onMiddlewareRegistered(observer: MiddlewareObserver): () => void {
+    this.#middlewareObservers.add(observer)
+    return () => this.#middlewareObservers.delete(observer)
+  }
+
+  #notifyRouteObservers(
+    method: HttpMethod,
+    path: string,
+    handlers: Handler[]
+  ): void {
+    for (const observer of this.#routeObservers) {
+      observer(method, path, handlers)
+    }
+  }
+
+  #notifyMiddlewareObservers(middleware: Handler): void {
+    for (const observer of this.#middlewareObservers) {
+      observer(middleware)
+    }
+  }
+
   #addRoute(
     method: HttpMethod,
     path: string,
@@ -644,6 +705,7 @@ class Hyperin {
         : (handlers as Handler[])
 
     this.#router.add(method, fullPath || '/', normalizedHandlers)
+    this.#notifyRouteObservers(method, fullPath || '/', normalizedHandlers)
     return this
   }
 
@@ -656,6 +718,63 @@ class Hyperin {
     }
 
     response.json(result as object)
+  }
+
+  #writeErrorResponse(response: Response, error: Error): void {
+    if (response.sent || response.writableEnded) return
+
+    const statusCode =
+      (error as unknown as { statusCode?: number }).statusCode ?? 500
+    response.status(statusCode).json({ statusCode, message: error.message })
+  }
+
+  #bindServer(server: Server): Server {
+    if (this.#boundServer === server) {
+      this.#server = server
+      return server
+    }
+
+    this.#server = server
+    this.#boundServer = server
+
+    // Track every TCP socket so we can destroy idle keep-alive
+    // connections during shutdown without waiting for their timeout.
+    server.on('connection', (socket: Socket) => {
+      this.#openSockets.add(socket)
+      socket.once('close', () => this.#openSockets.delete(socket))
+    })
+
+    // Mark the socket as busy while a request is in flight so shutdown()
+    // knows not to destroy it before the response finishes.
+    server.on(
+      'request',
+      async (request: IncomingMessage, response: ServerResponse) => {
+        await this.#dispatch(request, response).catch((err) => {
+          console.error('[listen] uncaught dispatch error:', err)
+
+          if (!response.headersSent && !response.writableEnded) {
+            response.statusCode = 500
+            response.setHeader(
+              'Content-Type',
+              'application/json; charset=utf-8'
+            )
+            response.end(
+              JSON.stringify({
+                statusCode: 500,
+                message:
+                  err instanceof Error ? err.message : 'Internal Server Error'
+              })
+            )
+          }
+        })
+      }
+    )
+
+    return server
+  }
+
+  attachServer(server: Server): Server {
+    return this.#bindServer(server)
   }
 
   // ──────────────────────────────────────────────
@@ -679,16 +798,25 @@ class Hyperin {
     this.#activeRequests++
     const socket = rawRequest.socket as Socket & { _busy?: boolean }
     socket._busy = true
-    rawResponse.once('finish', () => {
+    let finalized = false
+    const finalizeRequest = () => {
+      if (finalized) return
+      finalized = true
       socket._busy = false
       this.#activeRequests--
       if (this.#shuttingDown && this.#activeRequests === 0) {
         this.#drainResolve?.()
       }
-    })
+    }
+    rawResponse.once('finish', finalizeRequest)
+    rawResponse.once('close', finalizeRequest)
 
     const request = rawRequest as Request
     const response = rawResponse as Response
+
+    rawRequest.once('aborted', () => {
+      request.abort(new Error('Request aborted'))
+    })
 
     // Expose app-level proxy trust settings to the request instance
     request.locals.trustProxyEnabled = this.#trustProxyEnabled
@@ -707,7 +835,7 @@ class Hyperin {
     if (!match) {
       return void response
         .status(404)
-        .json({ error: 'Not Found', path, method })
+        .json({ statusCode: 404, message: 'Not Found' })
     }
 
     request.params = match.params
@@ -721,10 +849,15 @@ class Hyperin {
     const context = {
       request,
       response,
-      next: undefined as unknown as () => Promise<void>
+      next: undefined as unknown as (error?: Error) => Promise<void>
     }
 
-    const next = async (): Promise<void> => {
+    const next = async (error?: Error): Promise<void> => {
+      if (error) {
+        await this.#runErrorMiddlewares(error, request, response)
+        return
+      }
+
       while (idx < total) {
         const handler = idx < mLen ? middlewares[idx++] : handlers[idx++ - mLen]
 
@@ -750,7 +883,7 @@ class Hyperin {
       }
 
       if (!match.matched && !response.sent) {
-        response.status(404).json({ error: 'Not Found', path, method })
+        response.status(404).json({ statusCode: 404, message: 'Not Found' })
       }
     }
 
@@ -765,29 +898,49 @@ class Hyperin {
     response: Response
   ): Promise<void> {
     const handlers = this.#router.errorMiddlewares
+    let currentError = err
 
     if (handlers.length === 0) {
-      const statusCode =
-        (err as unknown as { statusCode: number }).statusCode || 500
-      response.status(statusCode).json({
-        error: err.message,
-        ...(process.env.NODE_ENV !== 'production' ? { stack: err.stack } : {})
-      })
+      this.#writeErrorResponse(response, currentError)
       return
     }
 
     let i = 0
 
-    const next = async (): Promise<void> => {
-      if (i >= handlers.length) return
+    const writeDefaultErrorResponse = (): void => {
+      this.#writeErrorResponse(response, currentError)
+    }
 
-      const result = handlers[i++]({ error: err, request, response, next })
-      if (isPromiseLike(result)) {
-        await result
+    const next = async (forwardedError?: Error): Promise<void> => {
+      if (forwardedError) {
+        currentError = forwardedError
+      }
+
+      if (i >= handlers.length) {
+        writeDefaultErrorResponse()
+        return
+      }
+
+      try {
+        const result = handlers[i++]({
+          error: currentError,
+          request,
+          response,
+          next
+        })
+
+        if (isPromiseLike(result)) {
+          await result
+        }
+      } catch (error) {
+        currentError = error as Error
+        await next(currentError)
       }
     }
 
     await next()
+
+    writeDefaultErrorResponse()
   }
 
   // ──────────────────────────────────────────────
@@ -795,51 +948,21 @@ class Hyperin {
   // ──────────────────────────────────────────────
 
   listen(port: number, hostname?: string, callback?: () => void): Server {
-    this.#server = createServer({
-      IncomingMessage: Request,
-      ServerResponse: Response
-    })
-
-    // Track every TCP socket so we can destroy idle keep-alive
-    // connections during shutdown without waiting for their timeout.
-    this.#server.on('connection', (socket: Socket) => {
-      this.#openSockets.add(socket)
-      socket.once('close', () => this.#openSockets.delete(socket))
-    })
-
-    // Mark the socket as busy while a request is in flight so shutdown()
-    // knows not to destroy it before the response finishes.
-    this.#server.on(
-      'request',
-      async (request: IncomingMessage, response: ServerResponse) => {
-        await this.#dispatch(request, response).catch((err) => {
-          console.error('[listen] uncaught dispatch error:', err)
-
-          if (!response.headersSent && !response.writableEnded) {
-            response.statusCode = 500
-            response.setHeader(
-              'Content-Type',
-              'application/json; charset=utf-8'
-            )
-            response.end(
-              JSON.stringify({
-                error:
-                  err instanceof Error ? err.message : 'Internal Server Error'
-              })
-            )
-          }
-        })
-      }
+    const server = this.#bindServer(
+      createServer({
+        IncomingMessage: Request,
+        ServerResponse: Response
+      })
     )
 
     const cb = callback || (() => {})
     if (hostname) {
-      this.#server.listen(port, hostname, cb)
+      server.listen(port, hostname, cb)
     } else {
-      this.#server.listen(port, cb)
+      server.listen(port, cb)
     }
 
-    return this.#server
+    return server
   }
 
   /**
@@ -954,6 +1077,7 @@ class Hyperin {
 }
 
 export type Instance = Application
+export { errorMiddleware }
 
 type RouteMethodName =
   | 'get'
@@ -972,14 +1096,14 @@ export function hyperin(): Application {
   // This is necessary so that supertest(app) receives a real Server
   // and uses the proper Request/Response implementations, instead of
   // creating a generic http.createServer internally.
-  const server = createServer(
-    { IncomingMessage: Request, ServerResponse: Response },
-    async (req: IncomingMessage, res: ServerResponse) => {
-      await core.handler(req, res)
-    }
-  )
+  const server = createServer({
+    IncomingMessage: Request,
+    ServerResponse: Response
+  })
+  core.attachServer(server)
 
   function use(path: string, ...handlers: Handler[]): void
+  function use(handler: Handler): void
   function use(handler: ErrorMiddleware): void
   function use(
     path: string | Handler | ErrorMiddleware,
@@ -1010,6 +1134,10 @@ export function hyperin(): Application {
     use,
     disable: (setting: AppSetting) => {
       core.disable(setting)
+      return app
+    },
+    enable: (setting: AppSetting) => {
+      core.enable(setting)
       return app
     },
     mount: (

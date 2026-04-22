@@ -1,15 +1,6 @@
-import type { Request } from '../request'
-import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type MiddlewareContext = {
-  request: Request
-  response: Response
-  next: NextFunction
-}
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import type { Request } from '#/request'
+import type { Response } from '#/response'
+import type { Middleware } from '#/types'
 
 export interface HstsOptions {
   maxAge?: number
@@ -36,14 +27,19 @@ const DEFAULT_HSTS: Required<HstsOptions> = {
 }
 
 function isSecureRequest(request: Request): boolean {
-  // Check X-Forwarded-Proto first (regardless of trust proxy flag) to preserve backward-compatible behavior
-  const forwardedProto = request.headers['x-forwarded-proto']
-  const protocol = Array.isArray(forwardedProto)
-    ? forwardedProto[0]
-    : forwardedProto
+  const trustProxyEnabled =
+    (request.locals as { trustProxyEnabled?: boolean }).trustProxyEnabled ??
+    false
 
-  if (protocol) {
-    return protocol.split(',')[0].trim().toLowerCase() === 'https'
+  if (trustProxyEnabled) {
+    const forwardedProto = request.headers['x-forwarded-proto']
+    const protocol = Array.isArray(forwardedProto)
+      ? forwardedProto[0]
+      : forwardedProto
+
+    if (protocol) {
+      return protocol.split(',')[0].trim().toLowerCase() === 'https'
+    }
   }
 
   // Avoid using 'any' in types: inspect TLS status safely

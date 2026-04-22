@@ -8,18 +8,65 @@ import {
 } from 'node:zlib'
 import { Readable } from 'node:stream'
 import { createReadStream, statSync } from 'node:fs'
+
+// ─────────────────────────────────────────────────────────────
+// URL Parsing (shared between instance.ts and request.ts)
+// ─────────────────────────────────────────────────────────────
+
+export function parseRawUrl(rawUrl: string): {
+  path: string
+  rawQuery: string | null
+} {
+  if (!rawUrl) {
+    return { path: '/', rawQuery: null }
+  }
+
+  let pathStart = 0
+
+  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    const authorityStart = rawUrl.indexOf('//')
+    const firstSlash = rawUrl.indexOf('/', authorityStart + 2)
+
+    if (firstSlash === -1) {
+      return { path: '/', rawQuery: null }
+    }
+
+    pathStart = firstSlash
+  }
+
+  let pathEnd = rawUrl.length
+  const queryStart = rawUrl.indexOf('?', pathStart)
+  if (queryStart !== -1 && queryStart < pathEnd) pathEnd = queryStart
+
+  const hashStart = rawUrl.indexOf('#', pathStart)
+  if (hashStart !== -1 && hashStart < pathEnd) pathEnd = hashStart
+
+  const rawPath = rawUrl.slice(pathStart, pathEnd)
+  const path = rawPath
+    ? rawPath.charCodeAt(0) === 47
+      ? rawPath
+      : `/${rawPath}`
+    : '/'
+
+  if (queryStart === -1) {
+    return { path, rawQuery: null }
+  }
+
+  const queryEnd =
+    hashStart !== -1 && hashStart > queryStart ? hashStart : rawUrl.length
+
+  return {
+    path,
+    rawQuery: rawUrl.slice(queryStart + 1, queryEnd)
+  }
+}
 import { extname } from 'node:path'
 
 import type { Request } from './request'
 import type { Response } from './response'
 
 import type { FileHandler, FileInfo } from './middleware/multipart'
-
-type ParseLimits = {
-  fileSize?: number
-  files?: number
-  fields?: number
-}
+import type { MultipartLimits } from './types'
 
 type ParsedResult = {
   fields: Record<string, string>
@@ -81,30 +128,29 @@ export function readBody(stream: Readable, maxBytes: number): Promise<Buffer> {
 export async function parseMultipart(
   request: Request,
   boundary: string,
-  limits: ParseLimits = {},
+  limits: MultipartLimits = {},
   onFile?: FileHandler
 ): Promise<ParsedResult> {
   const fields: Record<string, string> = {}
   const files: Record<string, unknown> = {}
-
-  let fileCount = 0
   let fieldCount = 0
+  let fileCount = 0
+  let partCount = 0
+  const bodyLimit = limits.bodySize ?? 10 * 1024 * 1024
 
-  // Collect the entire body into a Buffer
-  // (for large streams, consider using an incremental parser like busboy)
-  const body = await new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = []
-    request.on('data', (chunk: Buffer) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    })
-    request.on('end', () => resolve(Buffer.concat(chunks)))
-    request.on('error', reject)
-  })
+  const body = await readBody(request, bodyLimit)
 
   const delimiter = Buffer.from(`--${boundary}`)
   const parts = splitBuffer(body, delimiter)
 
   for (const part of parts) {
+    partCount++
+    if (limits.parts !== undefined && partCount > limits.parts) {
+      throw Object.assign(new Error('Too many multipart parts'), {
+        status: 413
+      })
+    }
+
     // Ignore the epilogue (last "--")
     if (part.equals(Buffer.from('--\r\n')) || part.equals(Buffer.from('--'))) {
       continue
@@ -140,21 +186,24 @@ export async function parseMultipart(
     if (!fieldname) continue
 
     if (filename !== null) {
-      // It's a file
-      if (limits.files !== undefined && fileCount >= limits.files) {
-        throw new Error(`Too many files (limit: ${limits.files})`)
+      fileCount++
+      if (limits.files !== undefined && fileCount > limits.files) {
+        throw Object.assign(new Error('Too many uploaded files'), {
+          status: 413
+        })
       }
 
       if (
         limits.fileSize !== undefined &&
         bodyContent.length > limits.fileSize
       ) {
-        throw new Error(
-          `File "${filename}" exceeds size limit of ${limits.fileSize} bytes`
+        throw Object.assign(
+          new Error(
+            `File "${filename}" exceeds size limit of ${limits.fileSize} bytes`
+          ),
+          { status: 413 }
         )
       }
-
-      fileCount++
 
       const info: FileInfo = {
         fieldname,
@@ -171,12 +220,25 @@ export async function parseMultipart(
       }
       // If there is no onFile, the file is simply discarded
     } else {
-      // It's a text field
-      if (limits.fields !== undefined && fieldCount >= limits.fields) {
-        throw new Error(`Too many fields (limit: ${limits.fields})`)
+      fieldCount++
+      if (limits.fields !== undefined && fieldCount > limits.fields) {
+        throw Object.assign(new Error('Too many multipart fields'), {
+          status: 413
+        })
       }
 
-      fieldCount++
+      if (
+        limits.fieldSize !== undefined &&
+        bodyContent.length > limits.fieldSize
+      ) {
+        throw Object.assign(
+          new Error(
+            `Field "${fieldname}" exceeds size limit of ${limits.fieldSize} bytes`
+          ),
+          { status: 413 }
+        )
+      }
+
       fields[fieldname] = bodyContent.toString('utf8')
     }
   }

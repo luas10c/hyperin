@@ -1,20 +1,7 @@
 import type { Readable } from 'node:stream'
 
-import { parseMultipart } from '../util'
-
-import type { Request } from '../request'
-import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type HandlerContext = {
-  request: Request
-  response: Response
-}
-
-type MiddlewareContext = HandlerContext & { next: NextFunction }
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import { parseMultipart } from '#/util'
+import type { Middleware, MultipartLimits } from '#/types'
 
 export type FileInfo = {
   filename: string
@@ -55,15 +42,12 @@ export interface MultipartOptions {
    * ```
    */
   onFile?: FileHandler
-  limits?: {
-    fileSize?: number
-    files?: number
-    fields?: number
-  }
+  limits?: MultipartLimits
 }
 
 export function multipart(options: MultipartOptions = {}): Middleware {
   const { onFile, limits = {} } = options
+  const bodyLimit = limits.bodySize ?? 10 * 1024 * 1024
 
   return async ({ request, response, next }) => {
     const contentType = request.headers['content-type'] || ''
@@ -83,6 +67,21 @@ export function multipart(options: MultipartOptions = {}): Middleware {
       })
     }
 
+    const contentLengthHeader = request.headers['content-length']
+    const contentLength = Number(
+      Array.isArray(contentLengthHeader)
+        ? contentLengthHeader[0]
+        : contentLengthHeader
+    )
+
+    if (Number.isFinite(contentLength) && contentLength > bodyLimit) {
+      return void response.status(413).json({
+        statusCode: 413,
+        error: 'Payload Too Large',
+        method: request.method
+      })
+    }
+
     try {
       const { fields, files } = await parseMultipart(
         request,
@@ -96,9 +95,13 @@ export function multipart(options: MultipartOptions = {}): Middleware {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Multipart parsing failed'
+      const statusCode =
+        typeof err === 'object' && err !== null && 'status' in err
+          ? ((err as { status?: number }).status ?? 400)
+          : 400
 
-      return void response.status(400).json({
-        statusCode: 400,
+      return void response.status(statusCode).json({
+        statusCode,
         error: message,
         method: request.method
       })

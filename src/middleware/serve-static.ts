@@ -2,21 +2,8 @@ import { stat } from 'node:fs/promises'
 import { resolve, join, relative, isAbsolute, sep } from 'node:path'
 import type { Stats } from 'node:fs'
 
-import { pipeFile } from '../util'
-
-import type { Request } from '../request'
-import type { Response } from '../response'
-
-type NextFunction = () => void | Promise<void>
-
-type HandlerContext = {
-  request: Request
-  response: Response
-}
-
-type MiddlewareContext = HandlerContext & { next: NextFunction }
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
+import { pipeFile } from '#/util'
+import type { Middleware } from '#/types'
 
 // ─────────────────────────────────────────────────────────────
 // Static file serving
@@ -40,8 +27,17 @@ export function serveStatic(
   const { index = true, maxAge = 0, etag = true, dotfiles = 'ignore' } = options
 
   return async ({ request, response }) => {
-    // request.path already stripped by use() — e.g., '/photo.jpg' instead of '/uploads/photo.jpg'
-    const urlPath = decodeURIComponent(request.path || '/')
+    // request.path is relative to the mounted prefix, while request.url stays original.
+    let urlPath: string
+    try {
+      urlPath = decodeURIComponent(request.path || '/')
+    } catch {
+      return void response.status(400).json({
+        statusCode: 400,
+        path: request.url ?? '/',
+        message: 'Bad Request'
+      })
+    }
 
     // Prevent path traversal
     const filePath = resolve(directory, '.' + sep + urlPath)

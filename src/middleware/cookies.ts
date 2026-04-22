@@ -1,15 +1,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
-import type { Request } from '../request'
+import type { Middleware } from '#/types'
 
-type NextFunction = () => void | Promise<void>
-
-type MiddlewareContext = {
-  request: Request
-  next: NextFunction
+function isUnsafePropertyKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype'
 }
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
 
 export interface CookiesOptions {
   decode?: (value: string) => string
@@ -104,6 +99,10 @@ export function cookies(options: CookiesOptions = {}): Middleware {
 
         if (name) {
           const decodedName = decode(name)
+          if (isUnsafePropertyKey(decodedName)) {
+            index = separator + 1
+            continue
+          }
           const decodedValue = decode(rawValue)
 
           if (secrets.length > 0) {

@@ -13,6 +13,10 @@ export type RequestBody =
 
 export type AnyRequest = Request<RequestBody, RequestParams, RequestQuery>
 
+function isUnsafePropertyKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype'
+}
+
 // ─────────────────────────────────────────────────────────────
 // Request
 // ─────────────────────────────────────────────────────────────
@@ -39,6 +43,7 @@ export class Request<
   #path: string | null = null
   #query: TQuery | null = null
   #rawQuery: string | null = null
+  #abortController = new AbortController()
 
   static #extractPathname(rawUrl: string): string {
     if (!rawUrl) return '/'
@@ -90,6 +95,10 @@ export class Request<
 
         if (rawKey) {
           const key = Request.#decodeQueryComponent(rawKey)
+          if (isUnsafePropertyKey(key)) {
+            index = separator + 1
+            continue
+          }
           const value =
             equals === -1
               ? ''
@@ -116,6 +125,16 @@ export class Request<
       )
     }
     return this.#parsedUrl
+  }
+
+  get signal(): AbortSignal {
+    return this.#abortController.signal
+  }
+
+  abort(reason?: unknown): void {
+    if (!this.#abortController.signal.aborted) {
+      this.#abortController.abort(reason)
+    }
   }
 
   get query(): TQuery {

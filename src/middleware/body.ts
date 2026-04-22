@@ -5,19 +5,13 @@ import {
   parseLimit
 } from '../util'
 
-import type { Request } from '../request'
-import type { Response } from '../response'
+import type { Request } from '#/request'
+import type { Response } from '#/response'
+import type { Middleware } from '#/types'
 
-type NextFunction = () => void | Promise<void>
-
-type HandlerContext = {
-  request: Request
-  response: Response
+function isUnsafePropertyKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype'
 }
-
-type MiddlewareContext = HandlerContext & { next: NextFunction }
-
-type Middleware = (ctx: MiddlewareContext) => void | Promise<void>
 
 export interface BodyParserOptions {
   /** Maximum body size. Ex: '100kb', '1mb'. Default: '100kb' */
@@ -266,6 +260,7 @@ function parseSimple(
     const value = eqIdx === -1 ? '' : decode(pair.slice(eqIdx + 1))
 
     if (!key) continue
+    if (isUnsafePropertyKey(key)) continue
 
     const existing = result[key]
     if (existing === undefined) {
@@ -335,6 +330,10 @@ function assignDeep(
   const head = key.slice(0, bracketIdx)
   const rest = key.slice(bracketIdx + 1, key.indexOf(']', bracketIdx))
   const tail = key.slice(key.indexOf(']', bracketIdx) + 1)
+
+  if (isUnsafePropertyKey(head) || (rest !== '' && isUnsafePropertyKey(rest))) {
+    return
+  }
 
   // tags[] -> array
   if (rest === '') {
