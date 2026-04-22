@@ -77,7 +77,7 @@ describe('timeout middleware', () => {
           },
           { once: true }
         )
-        })
+      })
     })
 
     const response: Response = await request(app).get('/slow')

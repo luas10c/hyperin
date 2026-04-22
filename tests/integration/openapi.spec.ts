@@ -604,21 +604,23 @@ describe('OpenAPI integration', () => {
 
     openapi(appA, {
       mapJsonSchema: {
-        'custom-vendor': () => ({
-          type: 'object',
-          properties: { email: { type: 'string' } },
-          required: ['email']
-        }) as Record<string, unknown>
+        'custom-vendor': () =>
+          ({
+            type: 'object',
+            properties: { email: { type: 'string' } },
+            required: ['email']
+          }) as Record<string, unknown>
       }
     })
     openapi(appB, {
       path: '/docs/openapi.json',
       mapJsonSchema: {
-        'custom-vendor': () => ({
-          type: 'object',
-          properties: { age: { type: 'number' } },
-          required: ['age']
-        }) as Record<string, unknown>
+        'custom-vendor': () =>
+          ({
+            type: 'object',
+            properties: { age: { type: 'number' } },
+            required: ['age']
+          }) as Record<string, unknown>
       }
     })
 
@@ -627,12 +629,18 @@ describe('OpenAPI integration', () => {
       request(appB).get('/docs/openapi.json')
     ])
 
-    expect(responseA.body.paths['/'].post.requestBody.content['application/json'].schema).toEqual({
+    expect(
+      responseA.body.paths['/'].post.requestBody.content['application/json']
+        .schema
+    ).toEqual({
       type: 'object',
       properties: { email: { type: 'string' } },
       required: ['email']
     })
-    expect(responseB.body.paths['/'].post.requestBody.content['application/json'].schema).toEqual({
+    expect(
+      responseB.body.paths['/'].post.requestBody.content['application/json']
+        .schema
+    ).toEqual({
       type: 'object',
       properties: { age: { type: 'number' } },
       required: ['age']
@@ -687,12 +695,20 @@ describe('OpenAPI integration', () => {
       request(appB).get('/docs/openapi.json')
     ])
 
-    expect(responseA.body.paths['/users'].get.responses['200'].content['application/json'].schema).toEqual({
+    expect(
+      responseA.body.paths['/users'].get.responses['200'].content[
+        'application/json'
+      ].schema
+    ).toEqual({
       type: 'object',
       properties: { email: { type: 'string' } },
       required: ['email']
     })
-    expect(responseB.body.paths['/users'].get.responses['200'].content['application/json'].schema).toEqual({
+    expect(
+      responseB.body.paths['/users'].get.responses['200'].content[
+        'application/json'
+      ].schema
+    ).toEqual({
       type: 'object',
       properties: { age: { type: 'number' } },
       required: ['age']

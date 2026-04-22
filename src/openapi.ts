@@ -118,7 +118,9 @@ type OperationMetadata =
   | OperationFragment
   | OpenAPIOperation
   | Promise<OperationFragment | OpenAPIOperation>
-  | ((context?: OpenAPIConversionContext) =>
+  | ((
+      context?: OpenAPIConversionContext
+    ) =>
       | OperationFragment
       | OpenAPIOperation
       | Promise<OperationFragment | OpenAPIOperation>)
@@ -1207,7 +1209,11 @@ export function describeOperation(operation: DescribeOperationInput): Handler {
 }
 
 export function model(models: Record<string, unknown>): Handler {
-  return setHandlerMetadata(async ({ next }) => next(), modelMetadataKey, models)
+  return setHandlerMetadata(
+    async ({ next }) => next(),
+    modelMetadataKey,
+    models
+  )
 }
 
 export function withHeader(
@@ -1274,11 +1280,16 @@ function registerModelsFromHandler(
   handler: Handler
 ): void {
   const metadata = handler as unknown as Record<symbol, unknown>
-  const models = metadata[modelMetadataKey] as Record<string, unknown> | undefined
+  const models = metadata[modelMetadataKey] as
+    | Record<string, unknown>
+    | undefined
   if (!models) return
 
   for (const [name, schema] of Object.entries(models)) {
-    state.modelRegistry.set(name, schemaToOpenAPI(schema, 'output', state.context))
+    state.modelRegistry.set(
+      name,
+      schemaToOpenAPI(schema, 'output', state.context)
+    )
   }
 }
 
@@ -1380,16 +1391,6 @@ async function fileExists(file: string): Promise<boolean> {
 
 async function loadOpenAPIFile(file: string): Promise<OpenAPIDocument> {
   return JSON.parse(await readFile(file, 'utf8')) as OpenAPIDocument
-}
-
-async function loadOrCreateOpenAPIFile(file: string): Promise<OpenAPIDocument> {
-  if (await fileExists(file)) {
-    return loadOpenAPIFile(file)
-  }
-
-  const document = await getOpenAPIDocument()
-  await writeOpenAPIFile(file, document)
-  return document
 }
 
 function getOpenAPICore(app: OpenAPIPluginTarget): OpenAPICoreLike | null {

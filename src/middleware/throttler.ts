@@ -99,7 +99,10 @@ export class MemoryRateLimitStore implements RateLimitStore {
     for (const [key, entry] of this.#tokenBucketEntries) {
       const elapsed = now - entry.lastRefillAt
       const refillPerMs = options.limit / options.windowMs
-      const tokens = Math.min(options.limit, entry.tokens + elapsed * refillPerMs)
+      const tokens = Math.min(
+        options.limit,
+        entry.tokens + elapsed * refillPerMs
+      )
 
       if (tokens >= options.limit) {
         this.#tokenBucketEntries.delete(key)

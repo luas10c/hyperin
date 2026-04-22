@@ -103,7 +103,10 @@ describe('multipart middleware', () => {
     const app = hyperin()
 
     app.use(multipart({ limits: { bodySize: 4 } }))
-    app.post('/upload', ({ request }) => request.body as Record<string, unknown>)
+    app.post(
+      '/upload',
+      ({ request }) => request.body as Record<string, unknown>
+    )
 
     const response: Response = await request(app)
       .post('/upload')

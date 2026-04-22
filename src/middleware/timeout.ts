@@ -15,14 +15,14 @@ export function timeout(options: TimeoutOptions = {}): Middleware {
   const statusCode = options.statusCode ?? 408
   const message = options.message ?? { error: 'Request Timeout' }
 
-    return async ({ request, response, next }) => {
-      if (options.skip?.(request, response)) {
-        return void (await next())
-      }
+  return async ({ request, response, next }) => {
+    if (options.skip?.(request, response)) {
+      return void (await next())
+    }
 
-      request.locals.abortSignal = request.signal
+    request.locals.abortSignal = request.signal
 
-      let timedOut = false
+    let timedOut = false
 
     const clear = () => {
       clearTimeout(timer)
@@ -30,15 +30,15 @@ export function timeout(options: TimeoutOptions = {}): Middleware {
       response.off('close', clear)
     }
 
-      const timer = setTimeout(async () => {
-        if (response.sent || response.writableEnded) return
+    const timer = setTimeout(async () => {
+      if (response.sent || response.writableEnded) return
 
-        timedOut = true
-        clear()
-        request.locals.timeout = true
-        request.abort(new Error('Request Timeout'))
+      timedOut = true
+      clear()
+      request.locals.timeout = true
+      request.abort(new Error('Request Timeout'))
 
-        response.setHeader('Connection', 'close')
+      response.setHeader('Connection', 'close')
 
       if (options.onTimeout) {
         await options.onTimeout(request, response)

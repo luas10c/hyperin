@@ -331,7 +331,10 @@ export function compress(options: CompressOptions = {}): Middleware {
           return cb ? originalEnd(cb) : originalEnd()
         }
 
-        if (encoding) return cb ? originalEnd(chunk, encoding, cb) : originalEnd(chunk, encoding)
+        if (encoding)
+          return cb
+            ? originalEnd(chunk, encoding, cb)
+            : originalEnd(chunk, encoding)
         return cb ? originalEnd(chunk, cb) : originalEnd(chunk)
       }
 
