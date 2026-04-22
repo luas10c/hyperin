@@ -53,6 +53,33 @@ describe('RadixRouter', () => {
     expect(match?.params).toEqual({})
   })
 
+  test('falls back from HEAD to GET for static routes', () => {
+    const router = new RadixRouter()
+    const handler: Handler = () => undefined
+
+    router.add('GET', '/health', [handler])
+
+    const match = router.match('HEAD', '/health')
+
+    expect(match).not.toBeNull()
+    expect(match?.matched).toBe(true)
+    expect(match?.handlers).toEqual([handler])
+  })
+
+  test('falls back from HEAD to GET for dynamic routes', () => {
+    const router = new RadixRouter()
+    const handler: Handler = () => undefined
+
+    router.add('GET', '/users/:id', [handler])
+
+    const match = router.match('HEAD', '/users/42')
+
+    expect(match).not.toBeNull()
+    expect(match?.matched).toBe(true)
+    expect(match?.handlers).toEqual([handler])
+    expect(match?.params).toEqual({ id: '42' })
+  })
+
   test('prioritizes static route before falling back to dynamic path', () => {
     const router = new RadixRouter()
     const staticHandler: Handler = () => undefined
@@ -66,6 +93,22 @@ describe('RadixRouter', () => {
     expect(match).not.toBeNull()
     expect(match?.handlers).toEqual([staticHandler])
     expect(match?.params).toEqual({})
+  })
+
+  test('prioritizes param matches before wildcard fallbacks', () => {
+    const router = new RadixRouter()
+    const paramHandler: Handler = () => undefined
+    const wildcardHandler: Handler = () => undefined
+
+    router.add('GET', '/files/:name', [paramHandler])
+    router.add('GET', '/files/*', [wildcardHandler])
+
+    const match = router.match('GET', '/files/readme')
+
+    expect(match).not.toBeNull()
+    expect(match?.matched).toBe(true)
+    expect(match?.handlers).toEqual([paramHandler])
+    expect(match?.params).toEqual({ name: 'readme' })
   })
 
   test('returns global middlewares even when no route matches', () => {
