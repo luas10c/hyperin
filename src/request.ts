@@ -160,8 +160,11 @@ export class Request<
     if (trustProxyEnabled) {
       const forwarded = this.headers['x-forwarded-for']
       if (forwarded) {
+        // Take the rightmost IP — it is appended by the trusted proxy and
+        // cannot be forged by the client (who only controls leftmost values).
         return (Array.isArray(forwarded) ? forwarded[0] : forwarded)
-          .split(',')[0]
+          .split(',')
+          .at(-1)!
           .trim()
       }
     }
