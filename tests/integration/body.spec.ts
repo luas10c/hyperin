@@ -65,6 +65,20 @@ describe('body parsers', () => {
     })
   })
 
+  test('json strict=false accepts primitive payloads', async () => {
+    const app = hyperin()
+    app.use(json({ strict: false }))
+    app.post('/json', ({ request }) => ({ value: request.body }))
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .send('"abc"')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ value: 'abc' })
+  })
+
   test('json verify can block request', async () => {
     const app = hyperin()
 
@@ -108,6 +122,25 @@ describe('body parsers', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ ok: true })
+  })
+
+  test('json rejects compressed payload when inflate=false', async () => {
+    const app = hyperin()
+    app.use(json({ inflate: false }))
+    app.post('/json', ({ request }) => request.body)
+    const body = await gzipJson({ ok: true })
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .set('Content-Encoding', 'gzip')
+      .send(body)
+
+    expect(response.status).toBe(415)
+    expect(response.body).toEqual({
+      error: 'Unsupported Content-Encoding: gzip',
+      type: 'encoding.unsupported'
+    })
   })
 
   test('urlencoded parses repeated pairs', async () => {
@@ -189,5 +222,22 @@ describe('body parsers', () => {
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ user: { name: 'Ana' } })
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  test('urlencoded extended enforces configured depth limit', async () => {
+    const app = hyperin()
+    app.use(urlencoded({ extended: true, depth: 1 }))
+    app.post('/form', ({ request }) => request.body as JsonObject)
+
+    const response: Response = await request(app)
+      .post('/form')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send('user[name][first]=Ana')
+
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual({
+      error: 'Object depth limit (1) exceeded',
+      type: 'parameters.depth.exceeded'
+    })
   })
 })

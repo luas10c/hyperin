@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream'
 
-import { parseMultipart } from '#/util'
+import { parseMultipart } from '#/utils/multipart'
 import type { Middleware, MultipartLimits } from '#/types'
 
 export type FileInfo = {

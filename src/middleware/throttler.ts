@@ -3,6 +3,7 @@ import type { Response } from '../response'
 import type { Middleware } from '#/types'
 
 export type RateLimitAlgorithm = 'fixed-window' | 'token-bucket'
+type MaybePromise<T> = T | Promise<T>
 
 export interface RateLimitResult {
   allowed: boolean
@@ -23,20 +24,45 @@ export interface RateLimitStore {
     key: string,
     options: RateLimitStoreOptions
   ): RateLimitResult | Promise<RateLimitResult>
+  decrement?(key: string, options: RateLimitStoreOptions): void | Promise<void>
 }
 
 export interface RateLimitOptions {
   algorithm?: RateLimitAlgorithm
-  limit?: number
+  limit?:
+    | number
+    | ((request: Request, response: Response) => MaybePromise<number>)
   windowMs?: number
-  keyGenerator?: (request: Request) => string
+  keyGenerator?: (request: Request, response: Response) => MaybePromise<string>
   keyHeader?: string
   store?: RateLimitStore
-  statusCode?: number
-  standardHeaders?: boolean
+  statusCode?:
+    | number
+    | ((request: Request, response: Response) => MaybePromise<number>)
+  standardHeaders?: boolean | 'draft-6'
   legacyHeaders?: boolean
-  message?: string | Record<string, unknown>
+  message?:
+    | string
+    | Record<string, unknown>
+    | ((
+        request: Request,
+        response: Response
+      ) => MaybePromise<string | Record<string, unknown>>)
   skip?: (request: Request, response: Response) => boolean
+  handler?: (
+    request: Request,
+    response: Response,
+    next: () => void | Promise<void>,
+    options: {
+      statusCode: number
+      message: string | Record<string, unknown>
+      limit: number
+      result: RateLimitResult
+    }
+  ) => void | Promise<void>
+  requestPropertyName?: string
+  skipSuccessfulRequests?: boolean
+  skipFailedRequests?: boolean
 }
 
 type FixedWindowEntry = {
@@ -75,11 +101,44 @@ export class MemoryRateLimitStore implements RateLimitStore {
     const now = Date.now()
     this.#scheduleSweep(now, options)
 
+    if (options.limit <= 0) {
+      const resetTime = secondsFromMs(options.windowMs)
+      return {
+        allowed: false,
+        limit: options.limit,
+        remaining: 0,
+        resetTime,
+        retryAfter: resetTime
+      }
+    }
+
     if (options.algorithm === 'token-bucket') {
       return this.#consumeTokenBucket(key, options, now)
     }
 
     return this.#consumeFixedWindow(key, options, now)
+  }
+
+  decrement(key: string, options: RateLimitStoreOptions): void {
+    if (options.algorithm === 'token-bucket') {
+      const entry = this.#tokenBucketEntries.get(key)
+      if (!entry) return
+
+      entry.tokens = Math.min(options.limit, entry.tokens + 1)
+      entry.lastRefillAt = Date.now()
+      if (entry.tokens >= options.limit) {
+        this.#tokenBucketEntries.delete(key)
+      }
+      return
+    }
+
+    const entry = this.#fixedWindowEntries.get(key)
+    if (!entry) return
+
+    entry.count = Math.max(0, entry.count - 1)
+    if (entry.count === 0) {
+      this.#fixedWindowEntries.delete(key)
+    }
   }
 
   #scheduleSweep(now: number, options: RateLimitStoreOptions): void {
@@ -201,8 +260,12 @@ export class MemoryRateLimitStore implements RateLimitStore {
   }
 }
 
-function resolveKey(request: Request, options: RateLimitOptions): string {
-  if (options.keyGenerator) return options.keyGenerator(request)
+async function resolveKey(
+  request: Request,
+  response: Response,
+  options: RateLimitOptions
+): Promise<string> {
+  if (options.keyGenerator) return await options.keyGenerator(request, response)
 
   if (options.keyHeader) {
     const header = getHeaderValue(request.get(options.keyHeader))
@@ -210,6 +273,34 @@ function resolveKey(request: Request, options: RateLimitOptions): string {
   }
 
   return request.ipAddress || 'unknown'
+}
+
+async function resolveLimit(
+  request: Request,
+  response: Response,
+  limit: RateLimitOptions['limit']
+): Promise<number> {
+  if (typeof limit === 'function') return await limit(request, response)
+  return limit ?? 100
+}
+
+async function resolveStatusCode(
+  request: Request,
+  response: Response,
+  statusCode: RateLimitOptions['statusCode']
+): Promise<number> {
+  if (typeof statusCode === 'function')
+    return await statusCode(request, response)
+  return statusCode ?? 429
+}
+
+async function resolveMessage(
+  request: Request,
+  response: Response,
+  message: RateLimitOptions['message']
+): Promise<string | Record<string, unknown>> {
+  if (typeof message === 'function') return await message(request, response)
+  return message ?? 'Too Many Requests'
 }
 
 function sendRateLimitHeaders(
@@ -238,43 +329,76 @@ function sendRateLimitHeaders(
 }
 
 export function throttler(options: RateLimitOptions = {}): Middleware {
-  const resolvedOptions: RateLimitStoreOptions = {
-    algorithm: options.algorithm ?? 'fixed-window',
-    limit: options.limit ?? 100,
-    windowMs: options.windowMs ?? 60_000
-  }
   const store = options.store ?? new MemoryRateLimitStore()
   const standardHeaders = options.standardHeaders ?? true
   const legacyHeaders = options.legacyHeaders ?? false
-  const statusCode = options.statusCode ?? 429
-  const message = options.message ?? 'Too Many Requests'
+  const requestPropertyName = options.requestPropertyName ?? 'rateLimit'
+  const algorithm = options.algorithm ?? 'fixed-window'
+  const windowMs = options.windowMs ?? 60_000
 
   return async ({ request, response, next }) => {
     if (options.skip?.(request, response)) {
       return void (await next())
     }
 
-    const key = resolveKey(request, options)
+    const resolvedOptions: RateLimitStoreOptions = {
+      algorithm,
+      limit: await resolveLimit(request, response, options.limit),
+      windowMs
+    }
+    const key = await resolveKey(request, response, options)
     const result = await store.consume(key, resolvedOptions)
+
+    ;(request as unknown as Record<string, unknown>)[requestPropertyName] =
+      result
 
     sendRateLimitHeaders(
       response,
       resolvedOptions,
       result,
-      standardHeaders,
+      standardHeaders !== false,
       legacyHeaders
     )
 
     if (!result.allowed) {
-      response.status(statusCode).json({
-        statusCode: 429,
-        path: request.url,
-        message
-      })
+      const statusCode = await resolveStatusCode(
+        request,
+        response,
+        options.statusCode
+      )
+      const message = await resolveMessage(request, response, options.message)
+
+      if (options.handler) {
+        await options.handler(request, response, next, {
+          statusCode,
+          message,
+          limit: resolvedOptions.limit,
+          result
+        })
+        return
+      }
+
+      const body =
+        typeof message === 'string'
+          ? {
+              statusCode,
+              path: request.url,
+              message
+            }
+          : message
+
+      response.status(statusCode).json(body)
 
       return
     }
 
     await next()
+
+    if (
+      (options.skipSuccessfulRequests && response.statusCode < 400) ||
+      (options.skipFailedRequests && response.statusCode >= 400)
+    ) {
+      await store.decrement?.(key, resolvedOptions)
+    }
   }
 }

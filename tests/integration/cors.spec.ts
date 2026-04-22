@@ -71,4 +71,48 @@ describe('CORS middleware', () => {
     expect(response.headers['access-control-allow-credentials']).toBe('true')
     expect(response.headers.vary).toBe('Origin')
   })
+
+  test('reflects requested headers on preflight when allowedHeaders is omitted', async () => {
+    const app = hyperin()
+    app.use(cors())
+    app.post('/resource', () => ({ ok: true }))
+
+    const response: Response = await request(app)
+      .options('/resource')
+      .set('Origin', 'https://example.com')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'X-Trace-Id, Authorization')
+
+    expect(response.status).toBe(204)
+    expect(response.headers['access-control-allow-headers']).toBe(
+      'X-Trace-Id, Authorization'
+    )
+    expect(response.headers.vary).toContain('Access-Control-Request-Headers')
+  })
+
+  test('supports dynamic origin callback', async () => {
+    const app = hyperin()
+    app.use(
+      cors({
+        origin: (origin, callback) => {
+          callback(null, origin === 'https://allowed.test')
+        }
+      })
+    )
+    app.get('/resource', ({ response }) => {
+      response.send('ok')
+    })
+
+    const allowed: Response = await request(app)
+      .get('/resource')
+      .set('Origin', 'https://allowed.test')
+    const blocked: Response = await request(app)
+      .get('/resource')
+      .set('Origin', 'https://blocked.test')
+
+    expect(allowed.headers['access-control-allow-origin']).toBe(
+      'https://allowed.test'
+    )
+    expect(blocked.headers['access-control-allow-origin']).toBeUndefined()
+  })
 })

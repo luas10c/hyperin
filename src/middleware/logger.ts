@@ -3,6 +3,7 @@ import { hrtime } from 'node:process'
 import type { Request } from '#/request'
 import type { Response } from '#/response'
 import type { Middleware } from '#/types'
+import { bold, cyan, gray, green, purple, red, yellow } from '#/utils/ansi'
 
 export interface LoggerInfo {
   method: string
@@ -13,31 +14,34 @@ export interface LoggerInfo {
   ipAddress: string
 }
 
+export type LoggerTokenCallback = (
+  request: Request,
+  response: Response,
+  arg?: string,
+  info?: LoggerInfo
+) => string | number | undefined | null
+
+export type CompiledLoggerFormat = (
+  request: Request,
+  response: Response,
+  info: LoggerInfo
+) => string
+
 export interface LoggerOptions {
   immediate?: boolean
   skip?: (request: Request, response: Response) => boolean
-  format?: (info: LoggerInfo, request: Request, response: Response) => string
+  format?:
+    | string
+    | ((info: LoggerInfo, request: Request, response: Response) => string)
   stream?: { write: (chunk: string) => boolean | void }
   colors?: boolean
 }
 
-const ANSI_RESET = '\u001B[0m'
-const ANSI_BOLD = '\u001B[1m'
-const ANSI_DIM = '\u001B[2m'
-const ANSI_CYAN = '\u001B[36m'
-const ANSI_GREEN = '\u001B[32m'
-const ANSI_YELLOW = '\u001B[33m'
-const ANSI_RED = '\u001B[31m'
-const ANSI_MAGENTA = '\u001B[35m'
+const loggerTokens = new Map<string, LoggerTokenCallback>()
+const namedFormats = new Map<string, string | CompiledLoggerFormat>()
 
-function colorize(value: string, color: string, enabled: boolean): string {
-  if (!enabled) return value
-  return `${color}${value}${ANSI_RESET}`
-}
-
-function style(value: string, ansi: string, enabled: boolean): string {
-  if (!enabled) return value
-  return `${ansi}${value}${ANSI_RESET}`
+function applyColor(enabled: boolean, formatter: (value: string) => string) {
+  return (value: string): string => (enabled ? formatter(value) : value)
 }
 
 function formatDuration(durationMs: number): string {
@@ -59,18 +63,18 @@ function formatBytes(bytesWritten: number): string {
 }
 
 function statusColor(statusCode: number): string {
-  if (statusCode >= 500) return ANSI_RED
-  if (statusCode >= 400) return ANSI_YELLOW
-  if (statusCode >= 300) return ANSI_MAGENTA
-  return ANSI_GREEN
+  if (statusCode >= 500) return 'red'
+  if (statusCode >= 400) return 'yellow'
+  if (statusCode >= 300) return 'purple'
+  return 'green'
 }
 
 function methodColor(method: string): string {
-  if (method === 'GET') return ANSI_CYAN
-  if (method === 'POST') return ANSI_GREEN
-  if (method === 'PUT' || method === 'PATCH') return ANSI_YELLOW
-  if (method === 'DELETE') return ANSI_RED
-  return ANSI_MAGENTA
+  if (method === 'GET') return 'cyan'
+  if (method === 'POST') return 'green'
+  if (method === 'PUT' || method === 'PATCH') return 'yellow'
+  if (method === 'DELETE') return 'red'
+  return 'purple'
 }
 
 function shouldUseColors(
@@ -86,31 +90,237 @@ function shouldUseColors(
 }
 
 function createDefaultFormat(colors: boolean) {
+  const withBold = applyColor(colors, bold)
+  const withGray = applyColor(colors, gray)
+  const palette = {
+    cyan: applyColor(colors, cyan),
+    green: applyColor(colors, green),
+    yellow: applyColor(colors, yellow),
+    red: applyColor(colors, red),
+    purple: applyColor(colors, purple)
+  }
+
   return (info: LoggerInfo): string => {
-    const method = style(
-      colorize(info.method, methodColor(info.method), colors),
-      ANSI_BOLD,
-      colors
+    const method = withBold(
+      palette[methodColor(info.method) as keyof typeof palette](info.method)
     )
-    const status = style(
-      colorize(String(info.statusCode), statusColor(info.statusCode), colors),
-      ANSI_BOLD,
-      colors
+    const status = withBold(
+      palette[statusColor(info.statusCode) as keyof typeof palette](
+        String(info.statusCode)
+      )
     )
-    const path = style(info.path, ANSI_BOLD, colors)
-    const duration = colorize(formatDuration(info.durationMs), ANSI_DIM, colors)
-    const size = colorize(formatBytes(info.bytesWritten), ANSI_DIM, colors)
+    const path = withBold(info.path)
+    const duration = withGray(formatDuration(info.durationMs))
+    const size = withGray(formatBytes(info.bytesWritten))
 
     return `${method} ${path} ${status} ${duration} ${size}`
   }
 }
 
-export function logger(options: LoggerOptions = {}): Middleware {
+function formatDateClf(date: Date): string {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ]
+
+  const pad = (value: number, width = 2): string =>
+    String(value).padStart(width, '0')
+  const offset = -date.getTimezoneOffset()
+  const sign = offset >= 0 ? '+' : '-'
+  const absOffset = Math.abs(offset)
+  const hours = Math.floor(absOffset / 60)
+  const minutes = absOffset % 60
+
+  return `${pad(date.getDate())}/${months[date.getMonth()]}/${date.getFullYear()}:${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${sign}${pad(hours)}${pad(minutes)}`
+}
+
+function getHeaderValue(
+  value: number | string | string[] | readonly string[] | undefined
+): string | undefined {
+  if (value === undefined) return undefined
+  return Array.isArray(value) ? value.join(', ') : String(value)
+}
+
+function getResponseBytesWritten(
+  response: Response,
+  initialBytesWritten: number
+): number {
+  const contentLength = getHeaderValue(response.getHeader('Content-Length'))
+
+  if (contentLength) {
+    const parsed = Number.parseInt(contentLength, 10)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+
+  return Math.max(0, (response.socket?.bytesWritten ?? 0) - initialBytesWritten)
+}
+
+function buildLoggerInfo(
+  request: Request,
+  response: Response,
+  startedAt: bigint,
+  initialBytesWritten: number
+): LoggerInfo {
+  return {
+    method: request.method || 'GET',
+    path: request.path,
+    statusCode: response.statusCode,
+    durationMs: Number(hrtime.bigint() - startedAt) / 1_000_000,
+    bytesWritten: getResponseBytesWritten(response, initialBytesWritten),
+    ipAddress: request.ipAddress
+  }
+}
+
+function compileFormatString(format: string): CompiledLoggerFormat {
+  const tokenPattern = /:([a-zA-Z-]+)(?:\[([^\]]+)\])?/g
+
+  return (request, response, info) =>
+    format.replace(tokenPattern, (_match, tokenName: string, arg?: string) => {
+      const token = loggerTokens.get(tokenName)
+      if (!token) return '-'
+
+      const value = token(request, response, arg, info)
+      return value === undefined || value === null || value === ''
+        ? '-'
+        : String(value)
+    })
+}
+
+function getCompiledFormat(
+  format: string | CompiledLoggerFormat,
+  colors: boolean
+): CompiledLoggerFormat {
+  if (typeof format === 'function') return format
+
+  const named = namedFormats.get(format)
+  if (typeof named === 'function') return named
+  if (typeof named === 'string') return compileFormatString(named)
+
+  if (format === 'dev') {
+    const palette = {
+      cyan: applyColor(colors, cyan),
+      green: applyColor(colors, green),
+      yellow: applyColor(colors, yellow),
+      red: applyColor(colors, red),
+      purple: applyColor(colors, purple)
+    }
+
+    return (request, response, info) => {
+      const methodName = request.method || 'GET'
+      const method =
+        palette[methodColor(methodName) as keyof typeof palette](methodName)
+      const status = palette[
+        statusColor(info.statusCode) as keyof typeof palette
+      ](String(info.statusCode))
+      const bytes = getHeaderValue(response.getHeader('Content-Length')) ?? '-'
+      return `${method} ${request.path} ${status} ${info.durationMs.toFixed(3)} ms - ${bytes}`
+    }
+  }
+
+  return compileFormatString(format)
+}
+
+function registerDefaultToken(
+  name: string,
+  callback: LoggerTokenCallback
+): void {
+  if (!loggerTokens.has(name)) loggerTokens.set(name, callback)
+}
+
+function registerDefaultFormat(
+  name: string,
+  format: string | CompiledLoggerFormat
+): void {
+  if (!namedFormats.has(name)) namedFormats.set(name, format)
+}
+
+registerDefaultToken('method', (request) => request.method || 'GET')
+registerDefaultToken('url', (request) => request.url || request.path)
+registerDefaultToken('status', (_request, response) => response.statusCode)
+registerDefaultToken('remote-addr', (request) => request.ipAddress || '-')
+registerDefaultToken('remote-user', () => '-')
+registerDefaultToken('http-version', (request) => request.httpVersion)
+registerDefaultToken(
+  'referrer',
+  (request) =>
+    getHeaderValue(request.get('referer')) ??
+    getHeaderValue(request.get('referrer')) ??
+    '-'
+)
+registerDefaultToken(
+  'user-agent',
+  (request) => getHeaderValue(request.get('user-agent')) ?? '-'
+)
+registerDefaultToken('date', (_request, _response, arg) => {
+  const date = new Date()
+  if (arg === 'iso') return date.toISOString()
+  if (arg === 'clf') return formatDateClf(date)
+  if (arg === 'web') return date.toUTCString()
+  return date.toUTCString()
+})
+registerDefaultToken('response-time', (_request, _response, arg, info) => {
+  const digits = arg ? Number.parseInt(arg, 10) : 3
+  return info?.durationMs.toFixed(Number.isNaN(digits) ? 3 : digits)
+})
+registerDefaultToken('total-time', (_request, _response, arg, info) => {
+  const digits = arg ? Number.parseInt(arg, 10) : 3
+  return info?.durationMs.toFixed(Number.isNaN(digits) ? 3 : digits)
+})
+registerDefaultToken('req', (request, _response, arg) =>
+  arg ? getHeaderValue(request.get(arg)) : undefined
+)
+registerDefaultToken('res', (_request, response, arg) =>
+  arg ? getHeaderValue(response.getHeader(arg)) : undefined
+)
+
+registerDefaultFormat(
+  'combined',
+  ':remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
+)
+registerDefaultFormat(
+  'common',
+  ':remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length]'
+)
+registerDefaultFormat(
+  'short',
+  ':remote-addr :method :url HTTP/:http-version :status :res[content-length] - :response-time ms'
+)
+registerDefaultFormat(
+  'tiny',
+  ':method :url :status :res[content-length] - :response-time ms'
+)
+
+type LoggerMiddlewareFactory = ((options?: LoggerOptions) => Middleware) & {
+  token: (
+    name: string,
+    callback: LoggerTokenCallback
+  ) => LoggerMiddlewareFactory
+  compile: (format: string) => CompiledLoggerFormat
+  format: (
+    name: string,
+    format: string | CompiledLoggerFormat
+  ) => LoggerMiddlewareFactory
+}
+
+const createLoggerMiddleware = (options: LoggerOptions = {}): Middleware => {
   const stream = options.stream ?? process.stdout
   const colors = shouldUseColors(stream, options.colors)
-  const format = options.format ?? createDefaultFormat(colors)
   const skip = options.skip
   const immediate = options.immediate ?? false
+  const resolvedFormat = options.format
+    ? getCompiledFormat(options.format as string | CompiledLoggerFormat, colors)
+    : undefined
+  const defaultFormat = options.format ? undefined : createDefaultFormat(colors)
 
   return async ({ request, response, next }) => {
     if (skip?.(request, response)) {
@@ -119,21 +329,23 @@ export function logger(options: LoggerOptions = {}): Middleware {
 
     const startedAt = hrtime.bigint()
     const initialBytesWritten = response.socket?.bytesWritten ?? 0
+    let logged = false
 
     const writeLog = () => {
-      const info: LoggerInfo = {
-        method: request.method || 'GET',
-        path: request.path,
-        statusCode: response.statusCode,
-        durationMs: Number(hrtime.bigint() - startedAt) / 1_000_000,
-        bytesWritten: Math.max(
-          0,
-          (response.socket?.bytesWritten ?? 0) - initialBytesWritten
-        ),
-        ipAddress: request.ipAddress
-      }
+      if (logged) return
+      logged = true
 
-      stream.write(`${format(info, request, response)}\n`)
+      const info = buildLoggerInfo(
+        request,
+        response,
+        startedAt,
+        initialBytesWritten
+      )
+      const line = resolvedFormat
+        ? resolvedFormat(request, response, info)
+        : (defaultFormat as (info: LoggerInfo) => string)(info)
+
+      stream.write(`${line}\n`)
     }
 
     if (immediate) {
@@ -149,3 +361,28 @@ export function logger(options: LoggerOptions = {}): Middleware {
     await next()
   }
 }
+
+export const logger: LoggerMiddlewareFactory = Object.assign(
+  createLoggerMiddleware,
+  {
+    token(
+      name: string,
+      callback: LoggerTokenCallback
+    ): LoggerMiddlewareFactory {
+      loggerTokens.set(name, callback)
+      return logger
+    },
+
+    compile(format: string): CompiledLoggerFormat {
+      return compileFormatString(format)
+    },
+
+    format(
+      name: string,
+      format: string | CompiledLoggerFormat
+    ): LoggerMiddlewareFactory {
+      namedFormats.set(name, format)
+      return logger
+    }
+  }
+)

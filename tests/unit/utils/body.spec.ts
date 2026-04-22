@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals'
 
-import { parseLimit } from '#/util'
+import { parseLimit } from '#/utils/body'
 
 describe('parseLimit', () => {
   test('converts bytes, kb, mb and gb', () => {

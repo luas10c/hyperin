@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises'
 import { resolve, join, relative, isAbsolute, sep } from 'node:path'
 import type { Stats } from 'node:fs'
 
-import { pipeFile } from '#/util'
+import { pipeFile } from '#/utils/static'
 import type { Middleware } from '#/types'
 
 export interface StaticOptions {

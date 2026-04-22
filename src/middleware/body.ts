@@ -3,7 +3,7 @@ import {
   getContentEncoding,
   readDecodedBody,
   parseLimit
-} from '../util'
+} from '#/utils/body'
 
 import type { Request } from '#/request'
 import type { Response } from '#/response'
