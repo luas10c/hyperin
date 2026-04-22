@@ -55,8 +55,8 @@ describe('serveStatic middleware', () => {
     expect(response.status).toBe(404)
     expect(response.body as StaticErrorResponse).toEqual({
       statusCode: 404,
-      error: 'Not Found',
-      method: 'GET'
+      path: '/.env',
+      message: 'Not Found'
     })
   })
 
