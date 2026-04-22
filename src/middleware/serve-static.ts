@@ -5,10 +5,6 @@ import type { Stats } from 'node:fs'
 import { pipeFile } from '#/util'
 import type { Middleware } from '#/types'
 
-// ─────────────────────────────────────────────────────────────
-// Static file serving
-// ─────────────────────────────────────────────────────────────
-
 export interface StaticOptions {
   /** Serve index.html for directory requests (default: true) */
   index?: boolean | string
@@ -25,8 +21,12 @@ export function serveStatic(
   options: StaticOptions = {}
 ): Middleware {
   const { index = true, maxAge = 0, etag = true, dotfiles = 'ignore' } = options
+  const isMissingPathError = (error: unknown): boolean => {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
+    return code === 'ENOENT' || code === 'ENOTDIR'
+  }
 
-  return async ({ request, response }) => {
+  return async ({ request, response, next }) => {
     // request.path is relative to the mounted prefix, while request.url stays original.
     let urlPath: string
     try {
@@ -34,7 +34,6 @@ export function serveStatic(
     } catch {
       return void response.status(400).json({
         statusCode: 400,
-        path: request.url ?? '/',
         message: 'Bad Request'
       })
     }
@@ -45,7 +44,6 @@ export function serveStatic(
     if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
       return void response.status(403).json({
         statusCode: 403,
-        path: request.url ?? '/',
         message: 'Forbidden'
       })
     }
@@ -58,14 +56,12 @@ export function serveStatic(
       if (dotfiles === 'deny') {
         return void response.status(403).json({
           statusCode: 403,
-          path: request.url ?? '/',
           message: 'Forbidden'
         })
       }
       if (dotfiles === 'ignore') {
         return void response.status(404).json({
           statusCode: 404,
-          path: request.url ?? '/',
           message: 'Not Found'
         })
       }
@@ -74,10 +70,14 @@ export function serveStatic(
     let fileStat: Stats
     try {
       fileStat = await stat(filePath)
-    } catch {
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        await next()
+        return
+      }
+
       return void response.status(404).json({
         statusCode: 404,
-        path: request.url ?? '/',
         message: 'Not Found'
       })
     }
@@ -85,21 +85,23 @@ export function serveStatic(
     // Directory → attempts to serve index
     if (fileStat.isDirectory()) {
       if (!index) {
-        return void response.status(404).json({
-          statusCode: 404,
-          path: request.url ?? '/',
-          message: 'Not Found'
-        })
+        await next()
+        return
       }
+
       const indexFile = index === true ? 'index.html' : index
       const indexPath = join(filePath, indexFile)
       let indexStat: Stats
       try {
         indexStat = await stat(indexPath)
-      } catch {
+      } catch (error) {
+        if (isMissingPathError(error)) {
+          await next()
+          return
+        }
+
         return void response.status(404).json({
           statusCode: 404,
-          path: request.url ?? '/',
           message: 'Not Found'
         })
       }
