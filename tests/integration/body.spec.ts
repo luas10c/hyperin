@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 import request, { type Response } from 'supertest'
-import { gzipSync } from 'node:zlib'
+import { createGzip } from 'node:zlib'
+import { Readable } from 'node:stream'
 
 import { json, urlencoded } from '#/middleware/body'
 import { hyperin } from '#/instance'
@@ -18,8 +19,18 @@ interface ErrorWithStatus extends Error {
   status?: number
 }
 
-function gzipJson(value: unknown): Buffer {
-  return gzipSync(Buffer.from(JSON.stringify(value)))
+async function gzipJson(value: unknown): Promise<Buffer> {
+  const input = Buffer.from(JSON.stringify(value))
+  const gzip = createGzip()
+  const chunks: Buffer[] = []
+
+  return await new Promise((resolve, reject) => {
+    gzip.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+    gzip.on('end', () => resolve(Buffer.concat(chunks)))
+    gzip.on('error', reject)
+
+    Readable.from(input).pipe(gzip)
+  })
 }
 
 describe('body parsers', () => {
@@ -87,12 +98,13 @@ describe('body parsers', () => {
     const app = hyperin()
     app.use(json())
     app.post('/json', ({ request }) => request.body)
+    const body = await gzipJson({ ok: true })
 
     const response: Response = await request(app)
       .post('/json')
       .set('Content-Type', 'application/json')
       .set('Content-Encoding', 'gzip')
-      .send(gzipJson({ ok: true }))
+      .send(body)
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ ok: true })
