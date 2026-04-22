@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from '@jest/globals'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
 import request from 'supertest'
 
 import hyperin from '#/instance'
@@ -174,12 +173,12 @@ function objectSchema(
   }
 }
 
-describe('openapi integration', () => {
+describe('OpenAPI integration', () => {
   afterEach(() => {
     clearOpenAPIRegistry()
   })
 
-  test('deriva validacao e documentacao do contrato da rota', async () => {
+  test('derives route contract validation and documentation', async () => {
     const app = hyperin()
     const createUserBody = objectSchema(
       {
@@ -261,7 +260,7 @@ describe('openapi integration', () => {
     expect(operation.responses['201'].description).toBe('User created')
   })
 
-  test('expoe o documento em um path customizado', async () => {
+  test('exposes the document at a custom path', async () => {
     const app = hyperin()
 
     app.get('/health', () => ({ ok: true }))
@@ -291,7 +290,7 @@ describe('openapi integration', () => {
     expect(defaultPathResponse.status).toBe(404)
   })
 
-  test('consome o arquivo gerado sem regenerar por request', async () => {
+  test('consumes the generated file without regenerating on request', async () => {
     const app = hyperin()
     const directory = await mkdtemp(join(tmpdir(), 'hyperin-openapi-'))
     const file = join(directory, 'openapi.json')
@@ -349,7 +348,7 @@ describe('openapi integration', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
-  test('retorna issues de validacao no formato errors', async () => {
+  test('returns validation issues in the errors format', async () => {
     const app = hyperin()
 
     app.use(json())
@@ -413,7 +412,7 @@ describe('openapi integration', () => {
     })
   })
 
-  test('documenta standard schema com fallback draft-07 e output para responses', async () => {
+  test('documents standard schema with draft-07 fallback and outputs for responses', async () => {
     const app = hyperin()
     const createUserBody = draft07OnlyObjectSchema(
       {
@@ -485,7 +484,7 @@ describe('openapi integration', () => {
     })
   })
 
-  test('usa mapJsonSchema para vendors sem Standard JSON Schema nativo', async () => {
+  test('uses mapJsonSchema for vendors without native Standard JSON Schema', async () => {
     const app = hyperin()
     const createUserBody = {
       '~standard': {

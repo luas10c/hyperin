@@ -8,7 +8,7 @@ type JsonResponse = {
 }
 
 describe('Response integration', () => {
-  test('response.json envia content-type e content-length', async () => {
+  test('response.json sends content-type and content-length', async () => {
     const app = hyperin()
     app.get('/json', ({ response }) => {
       response.status(201).json({ ok: true })
@@ -24,7 +24,7 @@ describe('Response integration', () => {
     expect(response.body as JsonResponse).toEqual({ ok: true })
   })
 
-  test('response.redirect define location', async () => {
+  test('response.redirect defines location', async () => {
     const app = hyperin()
     app.get('/from', ({ response }) => {
       response.redirect('/to', 301)
@@ -39,7 +39,7 @@ describe('Response integration', () => {
     expect(response.headers.location).toBe('/to')
   })
 
-  test('response.cookie serializa opções', async () => {
+  test('response.cookie serializes options', async () => {
     const app = hyperin()
     app.get('/cookie', ({ response }) => {
       response.cookie('token', 'abc 123', {
@@ -62,7 +62,7 @@ describe('Response integration', () => {
     expect(setCookie).toContain('SameSite=Strict')
   })
 
-  test('response.send com Buffer envia octet-stream', async () => {
+  test('response.send with Buffer sends octet-stream', async () => {
     const app = hyperin()
     app.get('/buffer', ({ response }) => {
       response.send(Buffer.from('abc'))

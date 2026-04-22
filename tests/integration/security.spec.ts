@@ -5,7 +5,7 @@ import hyperin from '#/instance'
 import { security } from '#/middleware/security'
 
 describe('security middleware', () => {
-  test('aplica headers defensivos por padrão', async () => {
+  test('applies defensive headers by default', async () => {
     const app = hyperin()
 
     app.use(security())

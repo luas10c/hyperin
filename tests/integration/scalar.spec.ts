@@ -5,8 +5,8 @@ import hyperin from '#/instance'
 import { openapi } from '#/openapi'
 import { scalar } from '#/scalar'
 
-describe('scalar integration', () => {
-  test('expoe a ui do scalar em uma rota customizada', async () => {
+describe('Scalar integration', () => {
+  test('exposes the scalar UI on a custom route', async () => {
     const app = hyperin()
 
     openapi(app, {

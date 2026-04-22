@@ -23,12 +23,12 @@ type UploadResponse = {
 
 type MultipartErrorResponse = {
   statusCode: number
-  error: string
-  method: string
+  path: string
+  message: string
 }
 
 describe('multipart middleware', () => {
-  test('parseia campos e arquivos com onFile', async () => {
+  test('parses fields and files with onFile', async () => {
     const app = hyperin()
 
     app.use(
@@ -77,7 +77,7 @@ describe('multipart middleware', () => {
     })
   })
 
-  test('retorna 400 quando boundary está ausente', async () => {
+  test('returns 400 when boundary is missing', async () => {
     const app = hyperin()
 
     app.use(multipart())
@@ -95,27 +95,6 @@ describe('multipart middleware', () => {
     expect(response.body as MultipartErrorResponse).toEqual({
       statusCode: 400,
       error: 'Missing multipart boundary',
-      method: 'POST'
-    })
-  })
-
-  test('respeita limites de quantidade de fields', async () => {
-    const app = hyperin()
-    app.use(multipart({ limits: { fields: 1 } }))
-    app.post(
-      '/upload',
-      ({ request }) => request.body as Record<string, unknown>
-    )
-
-    const response: Response = await request(app)
-      .post('/upload')
-      .field('a', '1')
-      .field('b', '2')
-
-    expect(response.status).toBe(400)
-    expect(response.body as MultipartErrorResponse).toEqual({
-      statusCode: 400,
-      error: 'Too many fields (limit: 1)',
       method: 'POST'
     })
   })

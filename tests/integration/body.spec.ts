@@ -23,7 +23,7 @@ function gzipJson(value: unknown): Buffer {
 }
 
 describe('body parsers', () => {
-  test('json parseia body válido', async () => {
+  test('json parses valid body', async () => {
     const app = hyperin()
     app.use(json())
     app.post('/json', ({ request }) => request.body as JsonObject)
@@ -37,7 +37,7 @@ describe('body parsers', () => {
     expect(response.body).toEqual({ hello: 'world' })
   })
 
-  test('json strict rejeita primitivo', async () => {
+  test('json strict rejects primitive', async () => {
     const app = hyperin()
     app.use(json())
     app.post('/json', ({ request }) => request.body)
@@ -54,7 +54,7 @@ describe('body parsers', () => {
     })
   })
 
-  test('json verify pode bloquear request', async () => {
+  test('json verify can block request', async () => {
     const app = hyperin()
 
     app.use(
@@ -83,7 +83,7 @@ describe('body parsers', () => {
     })
   })
 
-  test('json aceita gzip quando inflate=true', async () => {
+  test('json accepts gzip when inflate=true', async () => {
     const app = hyperin()
     app.use(json())
     app.post('/json', ({ request }) => request.body)
@@ -98,7 +98,7 @@ describe('body parsers', () => {
     expect(response.body).toEqual({ ok: true })
   })
 
-  test('urlencoded simple parseia pares repetidos', async () => {
+  test('urlencoded parses repeated pairs', async () => {
     const app = hyperin()
     app.use(urlencoded())
     app.post('/form', ({ request }) => request.body as JsonObject)
@@ -115,7 +115,7 @@ describe('body parsers', () => {
     })
   })
 
-  test('urlencoded extended suporta objetos e arrays', async () => {
+  test('urlencoded extended supports objects and arrays', async () => {
     const app = hyperin()
     app.use(urlencoded({ extended: true }))
     app.post('/form', ({ request }) => request.body as JsonObject)
@@ -132,7 +132,7 @@ describe('body parsers', () => {
     })
   })
 
-  test('urlencoded respeita parameterLimit', async () => {
+  test('urlencoded respects parameterLimit', async () => {
     const app = hyperin()
     app.use(urlencoded({ parameterLimit: 1 }))
     app.post('/form', ({ request }) => request.body as JsonObject)

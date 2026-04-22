@@ -1,26 +1,26 @@
 import { describe, expect, test } from '@jest/globals'
 import request from 'supertest'
 
+import type { Stream } from 'node:stream'
+
 import hyperin from '#/instance'
 import { compress } from '#/middleware/compress'
 
 function bufferParser(
-  res: NodeJS.ReadableStream & {
-    on: (event: string, listener: (chunk?: Buffer) => void) => void
-  },
-  callback: (error: Error | null, body: Buffer) => void
+  stream: Stream,
+  callback: (error: Error | null, body: unknown) => void
 ): void {
   const chunks: Buffer[] = []
 
-  res.on('data', (chunk?: Buffer) => {
+  stream.on('data', (chunk?: Buffer) => {
     if (chunk) chunks.push(Buffer.from(chunk))
   })
 
-  res.on('end', () => {
+  stream.on('end', () => {
     callback(null, Buffer.concat(chunks))
   })
 
-  res.on('error', (error?: Buffer) => {
+  stream.on('error', (error?: Buffer) => {
     callback(
       error instanceof Error ? error : new Error('stream error'),
       Buffer.alloc(0)
@@ -29,7 +29,7 @@ function bufferParser(
 }
 
 describe('compress middleware', () => {
-  test('comprime respostas textuais com gzip', async () => {
+  test('compresses textual responses with gzip', async () => {
     const app = hyperin()
 
     app.use(compress({ encodings: ['gzip'], threshold: 32 }))
@@ -47,7 +47,7 @@ describe('compress middleware', () => {
     expect(response.body.toString('utf8')).toBe('a'.repeat(256))
   })
 
-  test('prefere brotli quando disponível', async () => {
+  test('prefers brotli when available', async () => {
     const app = hyperin()
 
     app.use(compress({ threshold: 32 }))
@@ -66,7 +66,7 @@ describe('compress middleware', () => {
     })
   })
 
-  test('não comprime payloads abaixo do threshold', async () => {
+  test('does not compress payloads below the threshold', async () => {
     const app = hyperin()
 
     app.use(compress({ threshold: 2048 }))

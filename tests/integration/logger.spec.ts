@@ -9,8 +9,8 @@ function stripAnsi(value: string): string {
 }
 
 describe('logger middleware', () => {
-  test('escreve uma linha com dados da resposta ao finalizar', async () => {
-    const write = jest.fn<() => boolean>().mockReturnValue(true)
+  test('logs a line with response data when finishing', async () => {
+    const write = jest.fn<(chunk: string) => boolean>().mockReturnValue(true)
     const app = hyperin()
 
     app.use(logger({ stream: { write }, colors: true }))

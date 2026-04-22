@@ -1,18 +1,17 @@
-import { setTimeout as delay } from 'node:timers/promises'
-
 import { describe, expect, test } from '@jest/globals'
+import { setTimeout } from 'node:timers/promises'
 import request, { type Response } from 'supertest'
 
 import hyperin from '#/instance'
 import { timeout } from '#/middleware/timeout'
 
 describe('timeout middleware', () => {
-  test('responde com timeout quando a request demora demais', async () => {
+  test('responds with timeout when request takes too long', async () => {
     const app = hyperin()
 
     app.use(timeout({ delay: 20 }))
     app.get('/slow', async () => {
-      await delay(50)
+      await setTimeout(50)
       return 'late'
     })
 
@@ -23,7 +22,7 @@ describe('timeout middleware', () => {
     expect(response.headers.connection).toBe('close')
   })
 
-  test('permite customizar status e handler de timeout', async () => {
+  test('allows customizing timeout status and handler', async () => {
     const app = hyperin()
 
     app.use(
@@ -36,7 +35,7 @@ describe('timeout middleware', () => {
       })
     )
     app.get('/slow', async () => {
-      await delay(50)
+      await setTimeout(50)
       return 'late'
     })
 
@@ -46,7 +45,7 @@ describe('timeout middleware', () => {
     expect(response.body).toEqual({ error: 'Service Unavailable' })
   })
 
-  test('não interfere em requests rápidas', async () => {
+  test('does not affect fast requests', async () => {
     const app = hyperin()
 
     app.use(timeout({ delay: 100 }))

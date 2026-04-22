@@ -5,7 +5,7 @@ import hyperin from '#/instance'
 import { cookies } from '#/middleware/cookies'
 
 describe('cookies middleware', () => {
-  test('parseia cookies simples da requisição', async () => {
+  test('parses simple cookies from the request', async () => {
     const app = hyperin()
 
     app.use(cookies())
@@ -19,7 +19,7 @@ describe('cookies middleware', () => {
     expect(response.body).toEqual({ theme: 'dark', session: 'abc 123' })
   })
 
-  test('acumula multiplos Set-Cookie na resposta', async () => {
+  test('accumulates multiple Set-Cookie headers in the response', async () => {
     const app = hyperin()
 
     app.use(cookies())
@@ -38,7 +38,7 @@ describe('cookies middleware', () => {
     ])
   })
 
-  test('aceita assinatura por tupla ao escrever cookie', async () => {
+  test('accepts tuple-based signature when writing a cookie', async () => {
     const app = hyperin()
 
     app.get('/tuple', ({ response }) => {

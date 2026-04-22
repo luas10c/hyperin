@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals'
 import { RadixRouter, type Handler } from '#/router'
 
 describe('RadixRouter', () => {
-  test('faz match de rota exata', () => {
+  test('matches exact route', () => {
     const router = new RadixRouter()
     const handler: Handler = () => undefined
 
@@ -17,7 +17,7 @@ describe('RadixRouter', () => {
     expect(match?.params).toEqual({})
   })
 
-  test('extrai parâmetros dinâmicos', () => {
+  test('extracts dynamic parameters', () => {
     const router = new RadixRouter()
     const handler: Handler = () => undefined
 
@@ -28,7 +28,7 @@ describe('RadixRouter', () => {
     expect(match?.params).toEqual({ id: '42', postId: '99' })
   })
 
-  test('captura wildcard', () => {
+  test('captures wildcard', () => {
     const router = new RadixRouter()
     const handler: Handler = () => undefined
 
@@ -39,7 +39,7 @@ describe('RadixRouter', () => {
     expect(match?.params).toEqual({ '*': 'css/app.css' })
   })
 
-  test('usa fast path para rota estática com método ALL', () => {
+  test('uses fast path for static route with ALL method', () => {
     const router = new RadixRouter()
     const handler: Handler = () => undefined
 
@@ -53,7 +53,7 @@ describe('RadixRouter', () => {
     expect(match?.params).toEqual({})
   })
 
-  test('prioriza rota estática antes de cair para caminho dinâmico', () => {
+  test('prioritizes static route before falling back to dynamic path', () => {
     const router = new RadixRouter()
     const staticHandler: Handler = () => undefined
     const dynamicHandler: Handler = () => undefined
@@ -68,7 +68,7 @@ describe('RadixRouter', () => {
     expect(match?.params).toEqual({})
   })
 
-  test('retorna middlewares globais mesmo sem rota casada', () => {
+  test('returns global middlewares even when no route matches', () => {
     const router = new RadixRouter()
     const middleware: Handler = () => undefined
 
@@ -82,7 +82,7 @@ describe('RadixRouter', () => {
     expect(match?.handlers).toEqual([])
   })
 
-  test('detecta error middleware pela assinatura', () => {
+  test('detects error middleware by signature', () => {
     const router = new RadixRouter()
     const errorMw = ({ error, next }: { error: Error; next: () => void }) => {
       void error

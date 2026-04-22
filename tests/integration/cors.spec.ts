@@ -4,8 +4,8 @@ import request, { type Response } from 'supertest'
 import { cors } from '#/middleware/cors'
 import { hyperin } from '#/instance'
 
-describe('cors middleware', () => {
-  test('preflight padrão responde com headers CORS', async () => {
+describe('CORS middleware', () => {
+  test('preflight default responds with CORS headers', async () => {
     const app = hyperin()
     app.use(cors())
     app.get('/resource', () => ({ ok: true }))
@@ -20,7 +20,7 @@ describe('cors middleware', () => {
     expect(response.headers['access-control-allow-methods']).toContain('POST')
   })
 
-  test('origin=true reflete origem e envia vary/credentials', async () => {
+  test('origin: true reflects origin and sends Vary and credentials', async () => {
     const app = hyperin()
     app.use(cors({ origin: true, credentials: true }))
     app.get('/resource', ({ response }) => {
@@ -38,7 +38,7 @@ describe('cors middleware', () => {
     expect(response.headers.vary).toBe('Origin')
   })
 
-  test('origin fixo bloqueia origem diferente no simple request', async () => {
+  test('static origin blocks disallowed origin on simple request', async () => {
     const app = hyperin()
     app.use(cors({ origin: 'https://allowed.test' }))
     app.get('/resource', ({ response }) => {

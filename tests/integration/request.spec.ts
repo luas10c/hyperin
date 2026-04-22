@@ -11,7 +11,7 @@ type RequestPayload = {
 }
 
 describe('Request integration', () => {
-  test('expõe params, query, path e get()', async () => {
+  test('exposes params, query, path and get()', async () => {
     const app = hyperin()
 
     app.get('/users/:id', ({ request }) => ({

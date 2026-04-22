@@ -9,7 +9,7 @@ import {
 } from '#/middleware/throttler'
 
 describe('throttler middleware', () => {
-  test('bloqueia requests acima do limite e envia headers padrão', async () => {
+  test('blocks requests above the limit and sends default headers', async () => {
     const app = hyperin()
 
     app.use(
@@ -40,7 +40,7 @@ describe('throttler middleware', () => {
     expect(third.headers['ratelimit-policy']).toBe('2;w=60')
   })
 
-  test('suporta chave baseada em header e legacy headers', async () => {
+  test('supports header-based key and legacy headers', async () => {
     const app = hyperin()
 
     app.use(
@@ -69,7 +69,7 @@ describe('throttler middleware', () => {
     expect(other.status).toBe(200)
   })
 
-  test('aceita store custom', async () => {
+  test('accepts a custom store', async () => {
     const app = hyperin()
     const store: RateLimitStore = {
       consume: () => ({
@@ -94,7 +94,7 @@ describe('throttler middleware', () => {
     })
   })
 
-  test('suporta algoritmo token bucket', async () => {
+  test('supports token bucket algorithm', async () => {
     const app = hyperin()
 
     app.use(

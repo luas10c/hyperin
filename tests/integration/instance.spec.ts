@@ -7,8 +7,8 @@ type ErrorResponse = {
   error: string
 }
 
-describe('instance integration', () => {
-  test('retorna texto quando handler devolve string', async () => {
+describe('Instance integration', () => {
+  test('returns text when handler returns string', async () => {
     const app = hyperin()
     app.get('/hello', () => 'ok')
 
@@ -19,7 +19,7 @@ describe('instance integration', () => {
     expect(response.headers['x-powered-by']).toBe('Hyperin')
   })
 
-  test('permite desabilitar o header x-powered-by', async () => {
+  test('allows disabling the X-Powered-By header', async () => {
     const app = hyperin()
 
     app.disable('x-powered-by')
@@ -31,7 +31,7 @@ describe('instance integration', () => {
     expect(response.headers['x-powered-by']).toBeUndefined()
   })
 
-  test('executa middlewares globais antes da rota', async () => {
+  test('executes global middlewares before the route', async () => {
     const app = createInstance()
     const calls: string[] = []
 
@@ -67,7 +67,7 @@ describe('instance integration', () => {
     ])
   })
 
-  test('mount registra sub-app no prefixo', async () => {
+  test('mount registers sub-app at prefix', async () => {
     const app = createInstance()
     const sub = createInstance()
 
@@ -80,7 +80,7 @@ describe('instance integration', () => {
     expect(response.body).toEqual({ status: 'ok' })
   })
 
-  test('error middleware intercepta exceções', async () => {
+  test('error middleware intercepts exceptions', async () => {
     const app = createInstance()
 
     app.use(async ({ error, response }) => {
@@ -97,7 +97,7 @@ describe('instance integration', () => {
     expect(response.body as ErrorResponse).toEqual({ error: 'kaboom' })
   })
 
-  test('retorna 404 quando rota não existe', async () => {
+  test('returns 404 when route does not exist', async () => {
     const app = createInstance()
 
     const response: Response = await request(app).get('/missing')

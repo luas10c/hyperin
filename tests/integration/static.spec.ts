@@ -14,7 +14,7 @@ type StaticErrorResponse = {
 }
 
 describe('serveStatic middleware', () => {
-  test('serve arquivo com content-type e cache-control', async () => {
+  test('serves file with content-type and cache-control', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hyperin-static-'))
     writeFileSync(join(dir, 'hello.txt'), 'oi')
 
@@ -29,7 +29,7 @@ describe('serveStatic middleware', () => {
     expect(response.text).toBe('oi')
   })
 
-  test('serve index.html em diretório', async () => {
+  test('serves index.html in directory', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hyperin-static-'))
     mkdirSync(join(dir, 'docs'))
     writeFileSync(join(dir, 'docs', 'index.html'), '<h1>docs</h1>')
@@ -43,7 +43,7 @@ describe('serveStatic middleware', () => {
     expect(response.text).toBe('<h1>docs</h1>')
   })
 
-  test('dotfiles ignore retorna 404', async () => {
+  test('dotfiles ignore returns 404', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hyperin-static-'))
     writeFileSync(join(dir, '.env'), 'secret=true')
 
@@ -60,7 +60,7 @@ describe('serveStatic middleware', () => {
     })
   })
 
-  test('responde 304 quando If-None-Match casa com o ETag', async () => {
+  test('responds 304 when If-None-Match matches the ETag', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hyperin-static-'))
     writeFileSync(join(dir, 'hello.txt'), 'cache')
 
