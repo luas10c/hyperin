@@ -89,6 +89,25 @@ import {
 } from 'hyperin/middleware'
 ```
 
+## CORS
+
+For public APIs, the default `cors()` configuration is usually fine.
+
+When using cookies or other credentialed cross-origin requests, do not rely on a wildcard origin. Use an explicit allowlist instead.
+
+```ts
+import { cors } from 'hyperin/middleware'
+
+app.use(
+  cors({
+    origin: ['https://app.example.com', 'https://admin.example.com'],
+    credentials: true
+  })
+)
+```
+
+Avoid patterns like `cors({ origin: '*', credentials: true })` for private APIs.
+
 ## Validation
 
 Route methods accept any number of handlers. When you need validation and documentation, pass the route options object as the last argument.
