@@ -90,13 +90,11 @@ describe('CORS middleware', () => {
     expect(response.headers.vary).toContain('Access-Control-Request-Headers')
   })
 
-  test('supports dynamic origin callback', async () => {
+  test('supports dynamic async origin resolver', async () => {
     const app = hyperin()
     app.use(
       cors({
-        origin: (origin, callback) => {
-          callback(null, origin === 'https://allowed.test')
-        }
+        origin: async (origin) => origin === 'https://allowed.test'
       })
     )
     app.get('/resource', ({ response }) => {

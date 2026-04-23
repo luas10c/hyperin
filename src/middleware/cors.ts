@@ -1,5 +1,11 @@
 import type { Middleware } from '#/types'
 
+type CorsOriginResolverResult = string | string[] | RegExp | boolean | undefined
+
+type CorsOriginResolver = (
+  origin: string | undefined
+) => CorsOriginResolverResult | Promise<CorsOriginResolverResult>
+
 export interface CorsOptions {
   /**
    * string     → fixed origin, e.g., 'http://example.com'
@@ -7,17 +13,9 @@ export interface CorsOptions {
    * RegExp     → tests the origin
    * true       → reflect the origin of the request (equivalent to '*' with credentials)
    * false      → disable CORS completely
-   * function   → asynchronous callback(origin, cb), same as express/cors
+   * function   → returns the allowed origin dynamically and may be async
    */
-  origin?:
-    | string
-    | string[]
-    | RegExp
-    | boolean
-    | ((
-        origin: string | undefined,
-        cb: (err: Error | null, allow?: boolean | string) => void
-      ) => void)
+  origin?: string | string[] | RegExp | boolean | CorsOriginResolver
 
   methods?: string | string[]
   allowedHeaders?: string | string[]
@@ -61,60 +59,45 @@ function toHeaderValue(v: string | string[]): string {
 }
 
 // Resolve the origin — returns the string to use or false to block
-function resolveOrigin(
+async function resolveOrigin(
   origin: CorsOptions['origin'],
   reqOrigin: string | undefined
 ): Promise<string | false> {
-  return new Promise((resolve, reject) => {
-    if (origin === '*') {
-      return resolve('*')
-    }
+  if (origin === '*') {
+    return '*'
+  }
 
-    if (origin === false) {
-      return resolve(false)
-    }
+  if (origin === false) {
+    return false
+  }
 
-    // true -> reflect the origin of the request (or '*' if none provided)
-    if (origin === true) {
-      return resolve(reqOrigin || '*')
-    }
+  // true -> reflect the origin of the request (or '*' if none provided)
+  if (origin === true) {
+    return reqOrigin || '*'
+  }
 
-    if (typeof origin === 'string') {
-      return resolve(reqOrigin === origin ? origin : false)
-    }
+  if (typeof origin === 'string') {
+    return reqOrigin === origin ? origin : false
+  }
 
-    if (origin instanceof RegExp) {
-      return resolve(reqOrigin && origin.test(reqOrigin) ? reqOrigin : false)
-    }
+  if (origin instanceof RegExp) {
+    return reqOrigin && origin.test(reqOrigin) ? reqOrigin : false
+  }
 
-    if (Array.isArray(origin)) {
-      return resolve(
-        reqOrigin &&
-          origin.some((o: RegExp | string) =>
-            o instanceof RegExp ? o.test(reqOrigin) : o === reqOrigin
-          )
-          ? reqOrigin
-          : false
+  if (Array.isArray(origin)) {
+    return reqOrigin &&
+      origin.some((o: RegExp | string) =>
+        o instanceof RegExp ? o.test(reqOrigin) : o === reqOrigin
       )
-    }
+      ? reqOrigin
+      : false
+  }
 
-    if (typeof origin === 'function') {
-      return origin(reqOrigin, (err, result) => {
-        if (err) return reject(err)
+  if (typeof origin === 'function') {
+    return resolveOrigin(await origin(reqOrigin), reqOrigin)
+  }
 
-        if (result === true) return resolve(reqOrigin || '*')
-        if (result === false) return resolve(false)
-        if (typeof result === 'string') return resolve(result)
-
-        // result pode ser qualquer tipo permitido por CorsOptions['origin']
-        resolveOrigin(result as CorsOptions['origin'], reqOrigin)
-          .then(resolve)
-          .catch(reject)
-      })
-    }
-
-    resolve(false)
-  })
+  return false
 }
 
 function resolveAllowedOrigin(
