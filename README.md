@@ -131,7 +131,6 @@ Semantics:
 
 Notes:
 
-- the callback should prefer `remoteAddress`; `ipAddress` is only a legacy alias for the same immediate peer value
 - the callback receives the immediate peer connected to the app, not the final resolved client IP
 - prefer explicit IP/CIDR allowlists in production
 - `enable('trust proxy')` is still supported and is equivalent to `app.set('trust proxy', true)`
