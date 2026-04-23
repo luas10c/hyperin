@@ -126,7 +126,9 @@ describe('serveStatic middleware', () => {
 
   test('blocks symlinks that escape the static root', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'hyperin-static-'))
-    const externalDir = await mkdtemp(join(tmpdir(), 'hyperin-static-external-'))
+    const externalDir = await mkdtemp(
+      join(tmpdir(), 'hyperin-static-external-')
+    )
     const externalFile = join(externalDir, 'secret.txt')
 
     await writeFile(externalFile, 'top-secret')
@@ -136,6 +138,29 @@ describe('serveStatic middleware', () => {
     app.use('/public', serveStatic(resolve(dir)))
 
     const response: Response = await request(app).get('/public/secret-link.txt')
+
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({
+      statusCode: 403,
+      message: 'Forbidden'
+    })
+  })
+
+  test('blocks directory index symlinks that escape the static root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hyperin-static-'))
+    const externalDir = await mkdtemp(
+      join(tmpdir(), 'hyperin-static-external-')
+    )
+    const externalFile = join(externalDir, 'index.html')
+
+    await mkdir(join(dir, 'docs'))
+    await writeFile(externalFile, '<h1>secret</h1>')
+    await symlink(externalFile, join(dir, 'docs', 'index.html'))
+
+    const app = hyperin()
+    app.use('/public', serveStatic(resolve(dir)))
+
+    const response: Response = await request(app).get('/public/docs/')
 
     expect(response.status).toBe(403)
     expect(response.body).toEqual({

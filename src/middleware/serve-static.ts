@@ -120,7 +120,7 @@ export function serveStatic(
         })
       }
 
-      if (!(await isPathInsideRoot(filePath))) {
+      if (!(await isPathInsideRoot(indexPath))) {
         return void response.status(403).json({
           statusCode: 403,
           message: 'Forbidden'
