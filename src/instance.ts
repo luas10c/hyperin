@@ -1032,34 +1032,31 @@ class Hyperin {
       next: undefined as unknown as (error?: Error) => Promise<void>
     }
 
-    const next = async (error?: Error): Promise<void> => {
-      if (error) {
-        await this.#runErrorMiddlewares(error, request, response)
-        return
-      }
+    const dispatchError = (error: Error): Promise<void> =>
+      this.#runErrorMiddlewares(error, request, response)
 
+    const dispatchNext = (): Promise<void> | void => {
       while (idx < total) {
         const handler = idx < mLen ? middlewares[idx++] : handlers[idx++ - mLen]
 
+        let result: unknown
         try {
-          const result = handler(context)
-
-          if (isPromiseLike(result)) {
-            try {
-              this.#writeHandlerResult(response, await result)
-            } catch (err) {
-              await this.#runErrorMiddlewares(err as Error, request, response)
-            }
-
-            return
-          }
-
-          this.#writeHandlerResult(response, result)
-          return
+          result = handler(context)
         } catch (err) {
-          await this.#runErrorMiddlewares(err as Error, request, response)
-          return
+          return dispatchError(err as Error)
         }
+
+        if (isPromiseLike(result)) {
+          return Promise.resolve(result).then(
+            (value) => {
+              this.#writeHandlerResult(response, value)
+            },
+            (err) => dispatchError(err as Error)
+          )
+        }
+
+        this.#writeHandlerResult(response, result)
+        return
       }
 
       if (!match.matched && !response.sent) {
@@ -1067,9 +1064,21 @@ class Hyperin {
       }
     }
 
+    const next = (error?: Error): Promise<void> => {
+      if (error) {
+        return dispatchError(error)
+      }
+
+      const result = dispatchNext()
+      return isPromiseLike(result) ? result : Promise.resolve()
+    }
+
     context.next = next
 
-    await next()
+    const initialResult = dispatchNext()
+    if (isPromiseLike(initialResult)) {
+      await initialResult
+    }
   }
 
   async #runErrorMiddlewares(
