@@ -84,7 +84,13 @@ describe('multipart middleware', () => {
 
     app.use(
       multipart({
-        onFile: async (stream: Readable, info: FileInfo) => {
+        onFile: async ({
+          stream,
+          info
+        }: {
+          stream: Readable
+          info: FileInfo
+        }) => {
           const chunks: Buffer[] = []
 
           for await (const chunk of stream) {
@@ -153,7 +159,7 @@ describe('multipart middleware', () => {
   test('returns 413 when multipart body exceeds configured limit', async () => {
     const app = hyperin()
 
-    app.use(multipart({ limits: { bodySize: 4 } }))
+    app.use(multipart({ limits: { totalSize: 4 } }))
     app.post(
       '/upload',
       ({ request }) => request.body as Record<string, unknown>
@@ -186,10 +192,19 @@ describe('multipart middleware', () => {
     expect(response.body).toEqual({ files: {} })
   })
 
-  test('returns 413 when uploaded file exceeds fileSize limit', async () => {
+  test('returns 413 when a single file field exceeds its totalSize limit', async () => {
     const app = hyperin()
 
-    app.use(multipart({ limits: { fileSize: 2 } }))
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            totalSize: 2
+          }
+        }
+      })
+    )
     app.post('/upload', ({ request }) => ({
       body: request.body,
       files: request.files
@@ -205,7 +220,7 @@ describe('multipart middleware', () => {
     expect(response.status).toBe(413)
     expect(response.body).toEqual({
       statusCode: 413,
-      error: 'File "a.txt" exceeds size limit of 2 bytes',
+      error: 'Field "avatar" exceeds totalSize limit of 2 bytes',
       method: 'POST'
     })
   })
@@ -320,18 +335,30 @@ describe('multipart middleware', () => {
     })
   })
 
-  test('rejects multipart bodies with too many tiny parts', async () => {
+  test('rejects multipart bodies with too many uploaded files', async () => {
     const app = hyperin()
 
-    app.use(multipart({ limits: { parts: 32 } }))
-    app.post(
-      '/upload',
-      ({ request }) => request.body as Record<string, unknown>
+    app.use(
+      multipart({
+        fields: {
+          gallery: {
+            kind: 'array',
+            maxFiles: 10
+          }
+        },
+        limits: {
+          files: 10
+        }
+      })
     )
+    app.post('/upload', ({ request }) => request.files)
 
     let req = request(app).post('/upload')
-    for (let i = 0; i < 64; i++) {
-      req = req.field(`f${i}`, '')
+    for (let i = 0; i < 11; i++) {
+      req = req.attach('gallery', Buffer.from(String(i)), {
+        filename: `${i}.txt`,
+        contentType: 'text/plain'
+      })
     }
 
     const response: Response = await req
@@ -339,9 +366,138 @@ describe('multipart middleware', () => {
     expect(response.status).toBe(413)
     expect(response.body).toEqual({
       statusCode: 413,
-      error: 'Too many multipart parts',
+      error: 'Too many uploaded files',
       method: 'POST'
     })
+  })
+
+  test('rejects unexpected multipart file fields when allowlist is configured', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            totalSize: 1024
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('unexpected', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual({
+      statusCode: 400,
+      error: 'Unexpected multipart file field "unexpected"',
+      method: 'POST'
+    })
+  })
+
+  test('supports array file fields and accumulates request.files[fieldname]', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          gallery: {
+            kind: 'array',
+            maxFiles: 2,
+            totalSize: 32
+          }
+        },
+        onFile: async ({
+          stream,
+          info
+        }: {
+          stream: Readable
+          info: FileInfo
+        }) => {
+          const chunks: Buffer[] = []
+
+          for await (const chunk of stream) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          }
+
+          return {
+            ...info,
+            content: Buffer.concat(chunks).toString('utf8')
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('gallery', Buffer.from('ab'), {
+        filename: '1.txt',
+        contentType: 'text/plain'
+      })
+      .attach('gallery', Buffer.from('cd'), {
+        filename: '2.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      gallery: [
+        {
+          fieldname: 'gallery',
+          filename: '1.txt',
+          mimetype: 'text/plain',
+          encoding: '7bit',
+          size: 2,
+          content: 'ab'
+        },
+        {
+          fieldname: 'gallery',
+          filename: '2.txt',
+          mimetype: 'text/plain',
+          encoding: '7bit',
+          size: 2,
+          content: 'cd'
+        }
+      ]
+    })
+  })
+
+  test('respects stream.highWaterMark for onFile streams', async () => {
+    const app = hyperin()
+    let writableHighWaterMark = 0
+
+    app.use(
+      multipart({
+        stream: {
+          highWaterMark: 1024
+        },
+        onFile: async ({ stream }) => {
+          const readableStream = stream as Readable & {
+            readableHighWaterMark?: number
+          }
+          writableHighWaterMark = readableStream.readableHighWaterMark ?? 0
+          stream.resume()
+        }
+      })
+    )
+    app.post('/upload', ({ response }) => response.send('ok'))
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('avatar', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(200)
+    expect(writableHighWaterMark).toBe(1024)
   })
 
   test('exposes the incoming file stream before the whole upload finishes', async () => {
@@ -361,7 +517,13 @@ describe('multipart middleware', () => {
 
     app.use(
       multipart({
-        onFile: async (stream: Readable, info: FileInfo) => {
+        onFile: async ({
+          stream,
+          info
+        }: {
+          stream: Readable
+          info: FileInfo
+        }) => {
           const chunks: Buffer[] = []
           let seen = false
 
@@ -540,7 +702,7 @@ describe('multipart middleware', () => {
 
     app.use(
       multipart({
-        onFile: async (stream: Readable) => {
+        onFile: async ({ stream }: { stream: Readable }) => {
           await new Promise<void>((resolve) => {
             stream.on('close', () => {
               streamClosed = true

@@ -11,10 +11,34 @@ export type FileInfo = {
   size: number
 }
 
-export type FileHandler = (
-  stream: Readable,
+export type FileHandlerContext = {
+  stream: Readable
   info: FileInfo
+}
+
+export type FileHandler = (
+  context: FileHandlerContext
 ) => Promise<unknown> | unknown
+
+export type MultipartFieldConfig =
+  | {
+      kind: 'single'
+      totalSize?: number
+    }
+  | {
+      kind: 'array'
+      maxFiles: number
+      totalSize?: number
+    }
+
+export type MultipartFieldMap = Record<string, MultipartFieldConfig>
+
+export interface MultipartStreamOptions {
+  /**
+   * High water mark used for file streams exposed to `onFile`.
+   */
+  highWaterMark?: number
+}
 
 export interface MultipartOptions {
   /**
@@ -24,7 +48,7 @@ export interface MultipartOptions {
    *
    * @example Upload to S3
    * ```ts
-   * onFile: async (stream, info) => {
+   * onFile: async ({ stream, info }) => {
    *   const upload = new Upload({
    *     client: s3,
    *     params: { Bucket: 'my-bucket', Key: info.filename, Body: stream }
@@ -35,19 +59,32 @@ export interface MultipartOptions {
    *
    * @example Save locally (old behavior)
    * ```ts
-   * onFile: (stream, info) => {
+   * onFile: ({ stream, info }) => {
    *   const dest = path.join('./uploads', info.filename)
    *   stream.pipe(fs.createWriteStream(dest))
    * }
    * ```
    */
   onFile?: FileHandler
+  /**
+   * Optional allowlist and per-field limits for uploaded files.
+   *
+   * When provided, file fields not present here are rejected.
+   */
+  fields?: MultipartFieldMap
+  /**
+   * Global multipart limits.
+   */
   limits?: MultipartLimits
+  /**
+   * Stream settings used for file streams exposed to `onFile`.
+   */
+  stream?: MultipartStreamOptions
 }
 
 export function multipart(options: MultipartOptions = {}): Middleware {
   const { onFile, limits = {} } = options
-  const bodyLimit = limits.bodySize ?? 10 * 1024 * 1024
+  const totalSizeLimit = limits.totalSize ?? 10 * 1024 * 1024
 
   return async ({ request, response, next }) => {
     const contentType = request.headers['content-type'] || ''
@@ -74,7 +111,7 @@ export function multipart(options: MultipartOptions = {}): Middleware {
         : contentLengthHeader
     )
 
-    if (Number.isFinite(contentLength) && contentLength > bodyLimit) {
+    if (Number.isFinite(contentLength) && contentLength > totalSizeLimit) {
       return void response.status(413).json({
         statusCode: 413,
         error: 'Payload Too Large',
@@ -86,7 +123,7 @@ export function multipart(options: MultipartOptions = {}): Middleware {
       const { fields, files } = await parseMultipart(
         request,
         boundary,
-        limits,
+        options,
         onFile
       )
 

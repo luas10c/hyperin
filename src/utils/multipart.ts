@@ -1,8 +1,12 @@
 import { PassThrough } from 'node:stream'
 
-import type { FileHandler, FileInfo } from '#/middleware/multipart'
+import type {
+  FileHandler,
+  FileInfo,
+  MultipartFieldConfig,
+  MultipartOptions
+} from '#/middleware/multipart'
 import type { Request } from '#/request'
-import type { MultipartLimits } from '#/types'
 
 type ParsedResult = {
   fields: Record<string, string>
@@ -51,18 +55,31 @@ function extractParam(header: string, param: string): string | null {
   return match ? match[1] : null
 }
 
+function getNormalizedFieldConfig(
+  fieldname: string,
+  fieldConfigs: MultipartOptions['fields']
+): MultipartFieldConfig | null {
+  if (!fieldConfigs) return { kind: 'single' }
+  return fieldConfigs[fieldname] ?? null
+}
+
 export async function parseMultipart(
   request: Request,
   boundary: string,
-  limits: MultipartLimits = {},
+  options: MultipartOptions = {},
   onFile?: FileHandler
 ): Promise<ParsedResult> {
+  const {
+    fields: fieldConfigs,
+    limits = {},
+    stream: streamOptions = {}
+  } = options
   const fields = Object.create(null) as Record<string, string>
   const files = Object.create(null) as Record<string, unknown>
-  let fieldCount = 0
   let fileCount = 0
-  let partCount = 0
-  const bodyLimit = limits.bodySize ?? 10 * 1024 * 1024
+  const totalSizeLimit = limits.totalSize ?? 10 * 1024 * 1024
+  const fieldFileCounts = new Map<string, number>()
+  const fieldFileSizes = new Map<string, number>()
 
   const initialBoundary = Buffer.from(`--${boundary}`)
   const boundaryDelimiter = Buffer.from(`\r\n--${boundary}`)
@@ -187,9 +204,12 @@ export async function parseMultipart(
     part.size += chunk.length
 
     if (part.filename !== null) {
-      if (limits.fileSize !== undefined && part.size > limits.fileSize) {
+      const config = getNormalizedFieldConfig(part.fieldname, fieldConfigs)
+      const nextFieldSize =
+        (fieldFileSizes.get(part.fieldname) ?? 0) + part.size
+      if (config?.totalSize !== undefined && nextFieldSize > config.totalSize) {
         fail(
-          `File "${part.filename}" exceeds size limit of ${limits.fileSize} bytes`,
+          `Field "${part.fieldname}" exceeds totalSize limit of ${config.totalSize} bytes`,
           413
         )
       }
@@ -197,13 +217,6 @@ export async function parseMultipart(
       if (part.info) part.info.size = part.size
       await writeToFileStream(part.stream, chunk)
       return
-    }
-
-    if (limits.fieldSize !== undefined && part.size > limits.fieldSize) {
-      fail(
-        `Field "${part.fieldname}" exceeds size limit of ${limits.fieldSize} bytes`,
-        413
-      )
     }
 
     part.buffers.push(chunk)
@@ -237,15 +250,26 @@ export async function parseMultipart(
       return
     }
 
-    partCount++
-    if (limits.parts !== undefined && partCount > limits.parts) {
-      fail('Too many multipart parts', 413)
-    }
-
     if (filename !== null) {
+      const config = getNormalizedFieldConfig(fieldname, fieldConfigs)
+      if (config === null) {
+        fail(`Unexpected multipart file field "${fieldname}"`, 400)
+      }
+
       fileCount++
       if (limits.files !== undefined && fileCount > limits.files) {
         fail('Too many uploaded files', 413)
+      }
+
+      const currentCount = fieldFileCounts.get(fieldname) ?? 0
+      if (config?.kind === 'single' && currentCount >= 1) {
+        fail(`Field "${fieldname}" only accepts a single file`, 413)
+      }
+      if (config?.kind === 'array' && currentCount >= config.maxFiles) {
+        fail(
+          `Field "${fieldname}" exceeds maxFiles limit of ${config.maxFiles}`,
+          413
+        )
       }
 
       const info: FileInfo = {
@@ -256,7 +280,11 @@ export async function parseMultipart(
         size: 0
       }
 
-      const stream = onFile ? new PassThrough() : undefined
+      const stream = onFile
+        ? new PassThrough({
+            highWaterMark: streamOptions.highWaterMark
+          })
+        : undefined
       stream?.on('error', () => {
         // Prevent unhandled stream errors when file processing aborts early.
       })
@@ -270,10 +298,20 @@ export async function parseMultipart(
       }
 
       if (onFile && stream) {
+        const normalizedConfig = config ?? ({ kind: 'single' } as const)
         const pending = Promise.resolve()
-          .then(() => onFile(stream, info))
+          .then(() => onFile({ stream, info }))
           .then((result) => {
-            files[fieldname] = result
+            if (normalizedConfig.kind === 'array') {
+              const current = files[fieldname]
+              if (Array.isArray(current)) {
+                current.push(result)
+              } else {
+                files[fieldname] = [result]
+              }
+            } else {
+              files[fieldname] = result
+            }
 
             // If the handler resolved before consuming the entire stream,
             // drain the remaining bytes so multipart parsing can continue.
@@ -296,11 +334,6 @@ export async function parseMultipart(
       return
     }
 
-    fieldCount++
-    if (limits.fields !== undefined && fieldCount > limits.fields) {
-      fail('Too many multipart fields', 413)
-    }
-
     currentPart = {
       fieldname,
       filename: null,
@@ -316,7 +349,7 @@ export async function parseMultipart(
         : Buffer.from(incoming as string)
 
       totalBytes += chunk.length
-      if (totalBytes > bodyLimit) {
+      if (totalBytes > totalSizeLimit) {
         fail('Payload Too Large', 413)
       }
 
@@ -386,6 +419,17 @@ export async function parseMultipart(
 
           if (currentPart) {
             await appendPartData(buffer.subarray(0, delimiterIndex))
+            const part = ensurePart()
+
+            if (part.filename !== null) {
+              const fieldname = part.fieldname
+              const nextFieldSize = fieldFileSizes.get(fieldname) ?? 0
+              fieldFileSizes.set(fieldname, nextFieldSize + part.size)
+              fieldFileCounts.set(
+                fieldname,
+                (fieldFileCounts.get(fieldname) ?? 0) + 1
+              )
+            }
             await finalizeCurrentPart()
           }
 

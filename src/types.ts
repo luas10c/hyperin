@@ -291,32 +291,12 @@ export type RouteMethodArgsWithOptions<
 
 export type MultipartLimits = {
   /**
-   * Maximum total multipart body size in bytes.
-   */
-  bodySize?: number
-
-  /**
-   * Maximum size, in bytes, for each uploaded file.
-   */
-  fileSize?: number
-
-  /**
-   * Maximum size, in bytes, for each non-file field value.
-   */
-  fieldSize?: number
-
-  /**
-   * Maximum number of uploaded files.
+   * Maximum number of uploaded files across the whole request.
    */
   files?: number
 
   /**
-   * Maximum number of non-file fields.
+   * Maximum total multipart payload size in bytes.
    */
-  fields?: number
-
-  /**
-   * Maximum total number of multipart parts, including files and fields.
-   */
-  parts?: number
+  totalSize?: number
 }
