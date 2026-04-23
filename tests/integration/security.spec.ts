@@ -57,4 +57,21 @@ describe('security middleware', () => {
       'max-age=15552000; includeSubDomains'
     )
   })
+
+  test('envia HSTS quando o proxy remoto está na allowlist', async () => {
+    const app = hyperin()
+
+    app.set('trust proxy', ['127.0.0.1', '::1'])
+    app.use(security())
+    app.get('/secure', () => 'ok')
+
+    const response: Response = await request(app)
+      .get('/secure')
+      .set('X-Forwarded-Proto', 'https')
+
+    expect(response.status).toBe(200)
+    expect(response.headers['strict-transport-security']).toBe(
+      'max-age=15552000; includeSubDomains'
+    )
+  })
 })

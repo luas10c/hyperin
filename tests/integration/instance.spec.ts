@@ -113,7 +113,7 @@ describe('Instance integration', () => {
       .get('/ip')
       .set('X-Forwarded-For', '198.51.100.1, 203.0.113.8')
     expect(direct.status).toBe(200)
-    expect(direct.body).toEqual({ ip: '::ffff:127.0.0.1' })
+    expect(direct.body).toEqual({ ip: '127.0.0.1' })
 
     app.enable('trust proxy')
 
@@ -123,6 +123,81 @@ describe('Instance integration', () => {
 
     expect(proxied.status).toBe(200)
     expect(proxied.body).toEqual({ ip: '198.51.100.1' })
+  })
+
+  test('supports trust proxy hop counts through app.set', async () => {
+    const app = createInstance()
+
+    app.set('trust proxy', 1)
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1, 203.0.113.8')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '203.0.113.8' })
+  })
+
+  test('supports trust proxy boolean true through app.set', async () => {
+    const app = createInstance()
+
+    app.set('trust proxy', true)
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1, 203.0.113.8')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '198.51.100.1' })
+  })
+
+  test('supports trust proxy allowlists through app.set', async () => {
+    const app = createInstance()
+
+    app.set('trust proxy', ['127.0.0.1', '::1'])
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '198.51.100.1' })
+  })
+
+  test('supports trust proxy functions through app.set', async () => {
+    const app = createInstance()
+
+    app.set('trust proxy', ({ remoteAddress }) => {
+      return remoteAddress === '127.0.0.1' || remoteAddress === '::1'
+    })
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '198.51.100.1' })
+  })
+
+  test('supports async trust proxy functions through app.set', async () => {
+    const app = createInstance()
+
+    app.set('trust proxy', async ({ ipAddress }) => {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      return ipAddress === '127.0.0.1' || ipAddress === '::1'
+    })
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '198.51.100.1' })
   })
 
   test('shutdown closes the public server instance', async () => {

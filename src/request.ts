@@ -2,6 +2,8 @@ import { IncomingMessage } from 'node:http'
 import type { Socket } from 'node:net'
 import type { ParsedUrlQuery } from 'node:querystring'
 
+import { normalizeIp } from '#/utils/trust-proxy'
+
 export type RequestParams = Record<string, unknown>
 export type RequestQuery = ParsedUrlQuery | Record<string, unknown>
 export type RequestBody =
@@ -174,20 +176,13 @@ export class Request<
   }
 
   get ipAddress(): string {
-    const locals = this.locals as unknown as { trustProxyEnabled?: boolean }
-    const trustProxyEnabled = locals?.trustProxyEnabled ?? false
-    if (trustProxyEnabled) {
-      const forwarded = this.headers['x-forwarded-for']
-      if (forwarded) {
-        // When proxy trust is enabled, the app expects the edge proxy to
-        // sanitize this header and expose the original client first.
-        const forwardedChain = Array.isArray(forwarded)
-          ? forwarded[0]
-          : forwarded
-        return forwardedChain.split(',')[0]!.trim()
-      }
+    const locals = this.locals as {
+      trustedClientIp?: string
     }
-    return this.socket?.remoteAddress || ''
+
+    return (
+      locals.trustedClientIp ?? normalizeIp(this.socket?.remoteAddress) ?? ''
+    )
   }
 
   get(header: string): string | string[] | undefined {

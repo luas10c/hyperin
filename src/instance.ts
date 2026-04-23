@@ -12,6 +12,12 @@ import { errorMiddleware, RadixRouter } from './router'
 import { validate } from './validation'
 import { describeOperation } from './openapi'
 import type { DescribeOperationInput } from './openapi'
+import {
+  parseForwardedHeader,
+  resolveTrustedClientIp,
+  shouldTrustForwardedHeaders,
+  type TrustProxySetting
+} from './utils/trust-proxy'
 import type {
   ApplyMiddleware,
   ApplyRouteOptions,
@@ -64,6 +70,13 @@ export interface ShutdownOptions {
 }
 
 export type AppSetting = 'x-powered-by' | 'trust proxy'
+/**
+ * Accepted values for `app.set('trust proxy', value)`.
+ *
+ * Prefer explicit IP/CIDR allowlists in production. Use `true` only when the
+ * app is reachable exclusively through trusted reverse proxies.
+ */
+export type TrustProxyConfig = TrustProxySetting
 
 // RouteChain
 // ─────────────────────────────────────────────────────────────
@@ -489,8 +502,34 @@ export interface Application extends Server<typeof Request, typeof Response> {
     (handler: Handler): void
     (handler: ErrorMiddleware): void
   }
+  /**
+   * Disables a built-in boolean app setting.
+   *
+   * - `disable('x-powered-by')`: stops sending the `X-Powered-By` header
+   * - `disable('trust proxy')`: ignores `X-Forwarded-*` headers
+   */
   disable: (setting: AppSetting) => Application
+  /**
+   * Enables a built-in boolean app setting.
+   *
+   * - `enable('x-powered-by')`: sends the `X-Powered-By` header
+   * - `enable('trust proxy')`: trusts forwarded headers from every proxy hop
+   *
+   * Prefer `app.set('trust proxy', ...)` when you need explicit hops,
+   * IP/CIDR allowlists, or custom trust logic.
+   */
   enable: (setting: AppSetting) => Application
+  /**
+   * Configures how the app trusts `X-Forwarded-*` headers.
+   *
+   * Examples:
+   * `app.set('trust proxy', true)`
+   * `app.set('trust proxy', 1)`
+   * `app.set('trust proxy', ['127.0.0.1', '10.0.0.0/8'])`
+   * `app.set('trust proxy', ({ remoteAddress }) => remoteAddress === '::1')`
+   * `app.set('trust proxy', async ({ remoteAddress }) => ['::1'].includes(remoteAddress))`
+   */
+  set: (setting: 'trust proxy', value: TrustProxyConfig) => Application
   mount: (
     prefix: string,
     mounted: Hyperin | Application | { [HYPERIN_CORE]?: Hyperin }
@@ -628,9 +667,7 @@ class Hyperin {
   #routeObservers = new Set<RouteObserver>()
   #middlewareObservers = new Set<MiddlewareObserver>()
   #xPoweredByEnabled = true
-  // If true, trust X-Forwarded-* headers from reverse proxies
-  #trustProxyEnabled = false
-  // Note: deprecate separate control for X-Forwarded-For. Trust Proxy governs behavior.
+  #trustProxy: TrustProxySetting = false
 
   constructor(opts: RouterOptions = {}) {
     this.#prefix = opts.prefix || ''
@@ -808,7 +845,7 @@ class Hyperin {
       this.#xPoweredByEnabled = false
     }
     if (setting === 'trust proxy') {
-      this.#trustProxyEnabled = false
+      this.#trustProxy = false
     }
     return this
   }
@@ -818,9 +855,32 @@ class Hyperin {
       this.#xPoweredByEnabled = true
     }
     if (setting === 'trust proxy') {
-      this.#trustProxyEnabled = true
+      this.#trustProxy = true
     }
     return this
+  }
+
+  set(setting: 'trust proxy', value: TrustProxySetting): this
+  set(setting: 'trust proxy', value: TrustProxySetting): this {
+    if (
+      typeof value === 'boolean' ||
+      typeof value === 'number' ||
+      Array.isArray(value) ||
+      typeof value === 'function'
+    ) {
+      if (typeof value === 'number') {
+        if (!Number.isInteger(value) || value < 0) {
+          throw new TypeError(
+            'trust proxy hop count must be a non-negative integer'
+          )
+        }
+      }
+
+      this.#trustProxy = value
+      return this
+    }
+
+    throw new TypeError('Invalid value for trust proxy')
   }
 
   #getRoutes(): [HttpMethod, string, Handler[]][] {
@@ -999,7 +1059,25 @@ class Hyperin {
     })
 
     // Expose app-level proxy trust settings to the request instance
-    request.locals.trustProxyEnabled = this.#trustProxyEnabled
+    request.locals.trustProxy = this.#trustProxy
+    request.locals.trustedClientIp = await resolveTrustedClientIp(
+      request.socket?.remoteAddress,
+      request.headers['x-forwarded-for'],
+      this.#trustProxy
+    )
+
+    if (
+      await shouldTrustForwardedHeaders(
+        request.socket?.remoteAddress,
+        this.#trustProxy
+      )
+    ) {
+      request.locals.trustedForwardedProtocol = parseForwardedHeader(
+        request.headers['x-forwarded-proto']
+      )[0]
+    } else {
+      request.locals.trustedForwardedProtocol = undefined
+    }
 
     if (this.#xPoweredByEnabled && !response.hasHeader('X-Powered-By')) {
       response.setHeader('X-Powered-By', 'Hyperin')
@@ -1321,6 +1399,12 @@ export function hyperin(): Application {
     return register as RouteMethod<Application>
   }
 
+  function set(setting: 'trust proxy', value: TrustProxySetting): Application
+  function set(setting: 'trust proxy', value: TrustProxySetting): Application {
+    core.set(setting, value)
+    return app
+  }
+
   // The app is the server itself — thus supertest(app) works directly.
   // Métodos de rota e middleware são adicionados via Object.assign.
   const app = Object.assign(server, {
@@ -1333,6 +1417,7 @@ export function hyperin(): Application {
       core.enable(setting)
       return app
     },
+    set,
     mount: (
       prefix: string,
       mounted: Hyperin | { [HYPERIN_CORE]?: Hyperin }

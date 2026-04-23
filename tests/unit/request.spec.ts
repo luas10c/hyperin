@@ -42,18 +42,17 @@ describe('Request', () => {
     expect(request.query).toEqual({})
   })
 
-  test('uses forwarded address only when trust proxy is enabled', () => {
+  test('prefers the trusted client ip cached during dispatch', () => {
     const request = createRequest('/health')
 
     Object.defineProperty(request.socket, 'remoteAddress', {
       value: '10.0.0.1',
       configurable: true
     })
-    request.headers['x-forwarded-for'] = '198.51.100.1, 203.0.113.8'
 
     expect(request.ipAddress).toBe('10.0.0.1')
 
-    request.locals.trustProxyEnabled = true
+    request.locals.trustedClientIp = '198.51.100.1'
 
     expect(request.ipAddress).toBe('198.51.100.1')
   })

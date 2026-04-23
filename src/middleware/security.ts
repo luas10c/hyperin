@@ -85,19 +85,12 @@ const DEFAULT_HSTS: Required<HstsOptions> = {
 }
 
 function isSecureRequest(request: Request): boolean {
-  const trustProxyEnabled =
-    (request.locals as { trustProxyEnabled?: boolean }).trustProxyEnabled ??
-    false
+  const forwardedProtocol = (
+    request.locals as { trustedForwardedProtocol?: string }
+  ).trustedForwardedProtocol
 
-  if (trustProxyEnabled) {
-    const forwardedProto = request.headers['x-forwarded-proto']
-    const protocol = Array.isArray(forwardedProto)
-      ? forwardedProto[0]
-      : forwardedProto
-
-    if (protocol) {
-      return protocol.split(',')[0].trim().toLowerCase() === 'https'
-    }
+  if (forwardedProtocol) {
+    return forwardedProtocol.toLowerCase() === 'https'
   }
 
   // Avoid using 'any' in types: inspect TLS status safely
