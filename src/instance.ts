@@ -207,12 +207,21 @@ interface RouteMethod<TSelf> {
     T4 extends RouteStep4<TPath, T1, T2, T3>
   >(
     path: TPath,
-    ...handlers: [...Handler[], T1, T2, T3, T4, RouteStep5<TPath, T1, T2, T3, T4>]
+    ...handlers: [
+      ...Handler[],
+      T1,
+      T2,
+      T3,
+      T4,
+      RouteStep5<TPath, T1, T2, T3, T4>
+    ]
   ): TSelf
   <const TPath extends string, TOptions extends RouteSchemaOptions>(
     path: TPath,
     ...handlers: [
-      handler: RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
+      handler: RouteMiddleware<
+        ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+      >,
       options: TOptions & RouteSchemaOptions
     ]
   ): TSelf
@@ -1077,8 +1086,10 @@ class Hyperin {
     }
 
     let i = 0
+    let defaultResponseWritten = false
 
     const writeDefaultErrorResponse = (): void => {
+      defaultResponseWritten = true
       this.#writeErrorResponse(response, currentError)
     }
 
@@ -1111,7 +1122,9 @@ class Hyperin {
 
     await next()
 
-    writeDefaultErrorResponse()
+    if (!defaultResponseWritten && !response.sent && !response.writableEnded) {
+      writeDefaultErrorResponse()
+    }
   }
 
   // ──────────────────────────────────────────────

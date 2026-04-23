@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import request, { type Response } from 'supertest'
@@ -122,5 +122,25 @@ describe('serveStatic middleware', () => {
     expect(registerResponse.body).toEqual({ route: 'register' })
     expect(loginResponse.status).toBe(200)
     expect(loginResponse.body).toEqual({ route: 'login' })
+  })
+
+  test('blocks symlinks that escape the static root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hyperin-static-'))
+    const externalDir = await mkdtemp(join(tmpdir(), 'hyperin-static-external-'))
+    const externalFile = join(externalDir, 'secret.txt')
+
+    await writeFile(externalFile, 'top-secret')
+    await symlink(externalFile, join(dir, 'secret-link.txt'))
+
+    const app = hyperin()
+    app.use('/public', serveStatic(resolve(dir)))
+
+    const response: Response = await request(app).get('/public/secret-link.txt')
+
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({
+      statusCode: 403,
+      message: 'Forbidden'
+    })
   })
 })

@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { resolve, join, relative, isAbsolute, sep } from 'node:path'
 import type { Stats } from 'node:fs'
 
@@ -21,9 +21,23 @@ export function serveStatic(
   options: StaticOptions = {}
 ): Middleware {
   const { index = true, maxAge = 0, etag = true, dotfiles = 'ignore' } = options
+  const resolvedDirectory = resolve(directory)
+  const rootDirectoryPromise = realpath(resolvedDirectory).catch(
+    () => resolvedDirectory
+  )
   const isMissingPathError = (error: unknown): boolean => {
     const code = (error as NodeJS.ErrnoException | undefined)?.code
     return code === 'ENOENT' || code === 'ENOTDIR'
+  }
+
+  const isPathInsideRoot = async (targetPath: string): Promise<boolean> => {
+    const [rootDirectory, resolvedTarget] = await Promise.all([
+      rootDirectoryPromise,
+      realpath(targetPath)
+    ])
+
+    const rel = relative(rootDirectory, resolvedTarget)
+    return !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))
   }
 
   return async ({ request, response, next }) => {
@@ -39,8 +53,8 @@ export function serveStatic(
     }
 
     // Prevent path traversal
-    const filePath = resolve(directory, '.' + sep + urlPath)
-    const rel = relative(directory, filePath)
+    const filePath = resolve(resolvedDirectory, '.' + sep + urlPath)
+    const rel = relative(resolvedDirectory, filePath)
     if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
       return void response.status(403).json({
         statusCode: 403,
@@ -106,9 +120,23 @@ export function serveStatic(
         })
       }
 
+      if (!(await isPathInsideRoot(filePath))) {
+        return void response.status(403).json({
+          statusCode: 403,
+          message: 'Forbidden'
+        })
+      }
+
       return void pipeFile(indexPath, indexStat, request, response, {
         maxAge,
         etag
+      })
+    }
+
+    if (!(await isPathInsideRoot(filePath))) {
+      return void response.status(403).json({
+        statusCode: 403,
+        message: 'Forbidden'
       })
     }
 

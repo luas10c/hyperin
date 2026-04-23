@@ -173,6 +173,34 @@ describe('Instance integration', () => {
     })
   })
 
+  test('runs the default error fallback only once after delegated error middleware', async () => {
+    const app = createInstance()
+    let messageReads = 0
+
+    app.use(async ({ error, next }) => {
+      await next(error)
+    })
+
+    app.get('/boom', () => {
+      throw {
+        statusCode: 500,
+        get message() {
+          messageReads++
+          return 'kaboom'
+        }
+      }
+    })
+
+    const response: Response = await request(app).get('/boom')
+
+    expect(response.status).toBe(500)
+    expect(response.body as ErrorResponse).toEqual({
+      statusCode: 500,
+      message: 'kaboom'
+    })
+    expect(messageReads).toBe(1)
+  })
+
   test('normal middleware can forward errors with next(error)', async () => {
     const app = createInstance()
 
