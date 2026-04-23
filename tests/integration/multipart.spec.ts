@@ -187,6 +187,30 @@ describe('multipart middleware', () => {
     })
   })
 
+  test('rejects multipart bodies with too many tiny parts', async () => {
+    const app = hyperin()
+
+    app.use(multipart({ limits: { parts: 32 } }))
+    app.post(
+      '/upload',
+      ({ request }) => request.body as Record<string, unknown>
+    )
+
+    let req = request(app).post('/upload')
+    for (let i = 0; i < 64; i++) {
+      req = req.field(`f${i}`, '')
+    }
+
+    const response: Response = await req
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      statusCode: 413,
+      error: 'Too many multipart parts',
+      method: 'POST'
+    })
+  })
+
   test('exposes the incoming file stream before the whole upload finishes', async () => {
     const app = hyperin()
     let resolveFirstChunk: (() => void) | undefined
@@ -318,5 +342,68 @@ describe('multipart middleware', () => {
       files: {}
     })
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  test('aborted multipart uploads release streams and keep the server healthy', async () => {
+    const app = hyperin()
+    let streamClosed = false
+
+    app.use(
+      multipart({
+        onFile: async (stream: Readable) => {
+          await new Promise<void>((resolve) => {
+            stream.on('close', () => {
+              streamClosed = true
+              resolve()
+            })
+            stream.resume()
+          })
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+    app.get('/health', () => ({ ok: true }))
+
+    const server = app.listen(0)
+    const address = server.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+    const boundary = '----hyperin-abort-test'
+    const partialBody = Buffer.from(
+      `--${boundary}\r\n` +
+        'Content-Disposition: form-data; name="avatar"; filename="a.txt"\r\n' +
+        'Content-Type: text/plain\r\n\r\n' +
+        'partial-upload'
+    )
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const req = sendHttpRequest({
+          method: 'POST',
+          port,
+          path: '/upload',
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': String(partialBody.length + 128)
+          }
+        })
+
+        req.on('error', () => resolve())
+        req.on('response', () => {
+          reject(new Error('upload should have been aborted by the client'))
+        })
+        req.write(partialBody)
+        setTimeout(() => req.destroy(), 10)
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      expect(streamClosed).toBe(true)
+
+      const health = await request(app).get('/health')
+      expect(health.status).toBe(200)
+      expect(health.body).toEqual({ ok: true })
+    } finally {
+      await app.shutdown()
+    }
   })
 })

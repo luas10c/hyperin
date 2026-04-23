@@ -143,6 +143,25 @@ describe('body parsers', () => {
     })
   })
 
+  test('json rejects gzip payloads that inflate beyond the configured limit', async () => {
+    const app = hyperin()
+    app.use(json({ limit: '8kb' }))
+    app.post('/json', ({ request }) => request.body)
+    const body = await gzipJson({ payload: 'x'.repeat(512 * 1024) })
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .set('Content-Encoding', 'gzip')
+      .send(body)
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      error: 'Body exceeds limit',
+      type: 'entity.too.large'
+    })
+  })
+
   test('urlencoded parses repeated pairs', async () => {
     const app = hyperin()
     app.use(urlencoded())
