@@ -1,4 +1,3 @@
-import { once } from 'node:events'
 import { PassThrough } from 'node:stream'
 
 import type { FileHandler, FileInfo } from '#/middleware/multipart'
@@ -54,6 +53,7 @@ export async function parseMultipart(
   const crlf = Buffer.from(CRLF)
   const trailingBytes = boundaryDelimiter.length
   const pendingFiles: Promise<void>[] = []
+  let terminalError: Error | null = null
 
   type CurrentPart = {
     fieldname: string
@@ -74,6 +74,19 @@ export async function parseMultipart(
     throw Object.assign(new Error(message), { status })
   }
 
+  const normalizeError = (error: unknown): Error =>
+    error instanceof Error ? error : new Error(String(error))
+
+  const getTerminalError = (): Error | null => terminalError
+
+  const setTerminalError = (error: unknown): Error => {
+    const normalized = normalizeError(error)
+    if (!terminalError) {
+      terminalError = normalized
+    }
+    return terminalError
+  }
+
   const ensurePart = (): CurrentPart => {
     const part = currentPart
     if (part === null) {
@@ -89,11 +102,54 @@ export async function parseMultipart(
     chunk: Buffer
   ): Promise<void> => {
     if (!stream || chunk.length === 0) return
-    if (!stream.write(chunk)) await once(stream, 'drain')
+
+    const error = getTerminalError()
+    if (error) throw error
+    if (stream.destroyed || !stream.writable) {
+      throw new Error('Multipart file stream is no longer writable')
+    }
+
+    if (!stream.write(chunk)) {
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = (): void => {
+          stream.off('drain', onDrain)
+          stream.off('error', onError)
+          stream.off('close', onClose)
+        }
+
+        const onDrain = (): void => {
+          cleanup()
+          resolve()
+        }
+
+        const onError = (error: Error): void => {
+          cleanup()
+          reject(error)
+        }
+
+        const onClose = (): void => {
+          cleanup()
+          reject(
+            getTerminalError() ??
+              new Error('Multipart file stream closed before draining')
+          )
+        }
+
+        stream.once('drain', onDrain)
+        stream.once('error', onError)
+        stream.once('close', onClose)
+      })
+    }
+
+    const nextError = getTerminalError()
+    if (nextError) throw nextError
   }
 
   const appendPartData = async (chunk: Buffer): Promise<void> => {
     if (chunk.length === 0) return
+
+    const error = getTerminalError()
+    if (error) throw error
 
     const part = ensurePart()
     part.size += chunk.length
@@ -164,6 +220,9 @@ export async function parseMultipart(
       }
 
       const stream = onFile ? new PassThrough() : undefined
+      stream?.on('error', () => {
+        // Prevent unhandled stream errors when file processing aborts early.
+      })
       currentPart = {
         fieldname,
         filename: info.filename,
@@ -174,13 +233,27 @@ export async function parseMultipart(
       }
 
       if (onFile && stream) {
-        pendingFiles.push(
-          Promise.resolve()
-            .then(() => onFile(stream, info))
-            .then((result) => {
-              files[fieldname] = result
-            })
-        )
+        const pending = Promise.resolve()
+          .then(() => onFile(stream, info))
+          .then((result) => {
+            files[fieldname] = result
+
+            // If the handler resolved before consuming the entire stream,
+            // drain the remaining bytes so multipart parsing can continue.
+            if (!stream.destroyed && !stream.readableEnded) {
+              stream.resume()
+            }
+          })
+          .catch((error) => {
+            const normalized = setTerminalError(error)
+            if (!stream.destroyed) {
+              stream.destroy(normalized)
+            }
+            throw normalized
+          })
+
+        pending.catch(() => undefined)
+        pendingFiles.push(pending)
       }
 
       return

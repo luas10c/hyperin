@@ -253,7 +253,12 @@ export function compress(options: CompressOptions = {}): Middleware {
       started = true
       compressionStream = createCompressionStream(selectedEncoding, options)
       compressionStream.on('data', (chunk: Buffer) => {
-        originalWrite(chunk)
+        if (!originalWrite(chunk)) {
+          compressionStream?.pause()
+          response.once('drain', () => {
+            compressionStream?.resume()
+          })
+        }
       })
       compressionStream.on('end', () => {
         originalEnd()

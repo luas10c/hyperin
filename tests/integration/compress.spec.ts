@@ -80,4 +80,30 @@ describe('compress middleware', () => {
     expect(response.headers['content-encoding']).toBeUndefined()
     expect(response.text).toBe('small payload')
   })
+
+  test('compresses chunked streaming responses', async () => {
+    const app = hyperin()
+    const payload = 'stream-'.repeat(256)
+
+    app.use(compress({ encodings: ['gzip'], threshold: 32 }))
+    app.get('/stream', ({ response }) => {
+      response.type('text/plain; charset=utf-8')
+
+      for (let i = 0; i < 4; i++) {
+        response.write(payload)
+      }
+
+      response.end()
+    })
+
+    const response = await request(app)
+      .get('/stream')
+      .set('Accept-Encoding', 'gzip')
+      .buffer(true)
+      .parse(bufferParser)
+
+    expect(response.status).toBe(200)
+    expect(response.headers['content-encoding']).toBe('gzip')
+    expect(response.body.toString('utf8')).toBe(payload.repeat(4))
+  })
 })

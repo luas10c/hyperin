@@ -160,6 +160,33 @@ describe('multipart middleware', () => {
     })
   })
 
+  test('returns an error when onFile rejects without hanging the upload', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        onFile: async () => {
+          throw new Error('upload failed')
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('avatar', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual({
+      statusCode: 400,
+      error: 'upload failed',
+      method: 'POST'
+    })
+  })
+
   test('exposes the incoming file stream before the whole upload finishes', async () => {
     const app = hyperin()
     let resolveFirstChunk: (() => void) | undefined
