@@ -19,10 +19,23 @@ function isUnsafePropertyKey(key: string): boolean {
 function parseHeaders(raw: string): Record<string, string> {
   const headers: Record<string, string> = {}
   for (const line of raw.split(CRLF)) {
+    if (line.trim() === '') continue
     const colon = line.indexOf(':')
-    if (colon === -1) continue
+    if (colon <= 0) {
+      throw Object.assign(new Error('Malformed multipart headers'), {
+        status: 400
+      })
+    }
+
     const key = line.slice(0, colon).trim().toLowerCase()
     const value = line.slice(colon + 1).trim()
+
+    if (headers[key] !== undefined) {
+      throw Object.assign(new Error(`Duplicate multipart header: ${key}`), {
+        status: 400
+      })
+    }
+
     headers[key] = value
   }
   return headers
@@ -100,6 +113,21 @@ export async function parseMultipart(
     }
     return part
   }
+
+  const destroyCurrentPartStream = (error: Error): void => {
+    if (currentPart?.stream && !currentPart.stream.destroyed) {
+      currentPart.stream.destroy(error)
+    }
+  }
+
+  const handleRequestAbort = (): void => {
+    const error = setTerminalError(
+      Object.assign(new Error('Request aborted'), { status: 400 })
+    )
+    destroyCurrentPartStream(error)
+  }
+
+  request.once('aborted', handleRequestAbort)
 
   const writeToFileStream = async (
     stream: PassThrough | undefined,
@@ -393,10 +421,9 @@ export async function parseMultipart(
     await Promise.all(pendingFiles)
     return { fields, files }
   } catch (error) {
-    const part = currentPart as CurrentPart | null
-    if (part !== null && part.stream) {
-      part.stream.destroy(error as Error)
-    }
+    destroyCurrentPartStream(error as Error)
     throw error
+  } finally {
+    request.off('aborted', handleRequestAbort)
   }
 }

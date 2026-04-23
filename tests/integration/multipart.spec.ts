@@ -28,6 +28,56 @@ type MultipartErrorResponse = {
   message: string
 }
 
+async function sendRawMultipart(
+  app: ReturnType<typeof hyperin>,
+  options: {
+    body: Buffer | string
+    boundary: string
+    path?: string
+    contentType?: string
+  }
+): Promise<{ status: number; body: string }> {
+  const server = app.listen(0)
+  const address = server.address()
+  const port = typeof address === 'object' && address ? address.port : 0
+  const body = Buffer.isBuffer(options.body)
+    ? options.body
+    : Buffer.from(options.body)
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const req = sendHttpRequest(
+        {
+          method: 'POST',
+          port,
+          path: options.path ?? '/upload',
+          headers: {
+            'Content-Type':
+              options.contentType ??
+              `multipart/form-data; boundary=${options.boundary}`,
+            'Content-Length': String(body.length)
+          }
+        },
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString('utf8')
+            })
+          )
+        }
+      )
+
+      req.on('error', reject)
+      req.end(body)
+    })
+  } finally {
+    await app.shutdown()
+  }
+}
+
 describe('multipart middleware', () => {
   test('parses fields and files with onFile', async () => {
     const app = hyperin()
@@ -187,6 +237,89 @@ describe('multipart middleware', () => {
     })
   })
 
+  test('rejects malformed multipart payload variants', async () => {
+    const cases = [
+      {
+        name: 'invalid opening boundary',
+        body: 'oops\r\nContent-Disposition: form-data; name="a"\r\n\r\n1',
+        expectedError: 'Malformed multipart body'
+      },
+      {
+        name: 'missing final boundary',
+        body:
+          '--test-boundary\r\n' +
+          'Content-Disposition: form-data; name="a"\r\n\r\n' +
+          '1',
+        expectedError: 'Unexpected end of multipart body'
+      },
+      {
+        name: 'invalid boundary separator',
+        body:
+          '--test-boundary\r\n' +
+          'Content-Disposition: form-data; name="a"\r\n\r\n' +
+          '1\r\n' +
+          '--test-boundaryxx',
+        expectedError: 'Malformed multipart body'
+      },
+      {
+        name: 'malformed part header line',
+        body:
+          '--test-boundary\r\n' +
+          'Content-Disposition form-data; name="a"\r\n\r\n' +
+          '1\r\n' +
+          '--test-boundary--\r\n',
+        expectedError: 'Malformed multipart headers'
+      }
+    ]
+
+    for (const testCase of cases) {
+      const app = hyperin()
+      app.use(multipart())
+      app.post(
+        '/upload',
+        ({ request }) => request.body as Record<string, unknown>
+      )
+
+      const response = await sendRawMultipart(app, {
+        boundary: 'test-boundary',
+        body: testCase.body
+      })
+
+      expect(response.status).toBe(400)
+      expect(JSON.parse(response.body)).toEqual({
+        statusCode: 400,
+        error: testCase.expectedError,
+        method: 'POST'
+      })
+    }
+  })
+
+  test('rejects duplicate headers within a multipart part', async () => {
+    const app = hyperin()
+    app.use(multipart())
+    app.post(
+      '/upload',
+      ({ request }) => request.body as Record<string, unknown>
+    )
+
+    const response = await sendRawMultipart(app, {
+      boundary: 'dup-boundary',
+      body:
+        '--dup-boundary\r\n' +
+        'Content-Disposition: form-data; name="a"\r\n' +
+        'Content-Disposition: form-data; name="b"\r\n\r\n' +
+        '1\r\n' +
+        '--dup-boundary--\r\n'
+    })
+
+    expect(response.status).toBe(400)
+    expect(JSON.parse(response.body)).toEqual({
+      statusCode: 400,
+      error: 'Duplicate multipart header: content-disposition',
+      method: 'POST'
+    })
+  })
+
   test('rejects multipart bodies with too many tiny parts', async () => {
     const app = hyperin()
 
@@ -313,6 +446,63 @@ describe('multipart middleware', () => {
         }
       })
       await expect(firstChunkSeen).resolves.toBeUndefined()
+    } finally {
+      await app.shutdown()
+    }
+  })
+
+  test('accepts a long quoted boundary and chunked body splits', async () => {
+    const app = hyperin()
+    const boundary = `hyperin-${'x'.repeat(180)}`
+    const body =
+      `--${boundary}\r\n` +
+      'Content-Disposition: form-data; name="title"\r\n\r\n' +
+      'hello\r\n' +
+      `--${boundary}--\r\n`
+
+    app.use(multipart())
+    app.post(
+      '/upload',
+      ({ request }) => request.body as Record<string, unknown>
+    )
+
+    const server = app.listen(0)
+    const address = server.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+    const chunks = [body.slice(0, 17), body.slice(17, 121), body.slice(121)]
+
+    try {
+      const response = await new Promise<{ status: number; body: string }>(
+        (resolve, reject) => {
+          const req = sendHttpRequest(
+            {
+              method: 'POST',
+              port,
+              path: '/upload',
+              headers: {
+                'Content-Type': `multipart/form-data; boundary="${boundary}"`
+              }
+            },
+            (res) => {
+              const buffers: Buffer[] = []
+              res.on('data', (chunk) => buffers.push(Buffer.from(chunk)))
+              res.on('end', () =>
+                resolve({
+                  status: res.statusCode ?? 0,
+                  body: Buffer.concat(buffers).toString('utf8')
+                })
+              )
+            }
+          )
+
+          req.on('error', reject)
+          for (const chunk of chunks) req.write(chunk)
+          req.end()
+        }
+      )
+
+      expect(response.status).toBe(200)
+      expect(JSON.parse(response.body)).toEqual({ title: 'hello' })
     } finally {
       await app.shutdown()
     }
