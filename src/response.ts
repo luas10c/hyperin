@@ -19,12 +19,14 @@ export interface CookieOptions {
 
   /**
    * Domain attribute for the cookie.
+   * Must be a valid hostname-like value without control characters.
    */
   domain?: string
 
   /**
    * Cookie path scope.
    * @default '/'
+   * Must start with '/'.
    */
   path?: string
 
@@ -40,6 +42,7 @@ export interface CookieOptions {
 
   /**
    * Controls whether the cookie is sent on cross-site requests.
+   * `SameSite=None` requires `secure: true`.
    */
   sameSite?: 'Strict' | 'Lax' | 'None' | 'strict' | 'lax' | 'none'
 }
@@ -53,6 +56,63 @@ function appendHeaderValue(
   if (current === undefined) return value
   if (Array.isArray(current)) return [...current, value]
   return [String(current), value]
+}
+
+function isCookieDomain(value: string): boolean {
+  return /^\.?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*$/.test(value)
+}
+
+function hasInvalidCookieChars(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code <= 0x1f || code === 0x7f || value[i] === ';') {
+      return true
+    }
+  }
+
+  return false
+}
+
+function normalizeSameSite(
+  value: CookieOptions['sameSite']
+): 'Strict' | 'Lax' | 'None' | undefined {
+  if (!value) return undefined
+
+  const normalized = value.toLowerCase()
+  if (normalized === 'strict') return 'Strict'
+  if (normalized === 'lax') return 'Lax'
+  if (normalized === 'none') return 'None'
+
+  throw new TypeError(`Invalid cookie sameSite value: ${String(value)}`)
+}
+
+function validateCookieOptions(options: CookieOptions): {
+  path: string
+  sameSite: 'Strict' | 'Lax' | 'None' | undefined
+} {
+  const path = options.path ?? '/'
+  if (!path.startsWith('/')) {
+    throw new TypeError('Cookie path must start with "/"')
+  }
+  if (hasInvalidCookieChars(path)) {
+    throw new TypeError('Cookie path contains invalid characters')
+  }
+
+  if (options.domain !== undefined) {
+    if (
+      hasInvalidCookieChars(options.domain) ||
+      !isCookieDomain(options.domain)
+    ) {
+      throw new TypeError('Cookie domain contains invalid characters')
+    }
+  }
+
+  const sameSite = normalizeSameSite(options.sameSite)
+  if (sameSite === 'None' && options.secure !== true) {
+    throw new TypeError('SameSite=None requires Secure')
+  }
+
+  return { path, sameSite }
 }
 
 export class Response extends ServerResponse<Request> {
@@ -169,9 +229,10 @@ export class Response extends ServerResponse<Request> {
     const [name, resolvedValue, resolvedOptions] = Array.isArray(nameOrInput)
       ? [nameOrInput[0], nameOrInput[1], nameOrInput[2] ?? {}]
       : [nameOrInput, value ?? '', options]
+    const { path, sameSite } = validateCookieOptions(resolvedOptions)
 
     let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(resolvedValue)}`
-    cookie += `; Path=${resolvedOptions.path ?? '/'}`
+    cookie += `; Path=${path}`
 
     if (resolvedOptions.maxAge !== undefined) {
       cookie += `; Max-Age=${resolvedOptions.maxAge}`
@@ -182,8 +243,8 @@ export class Response extends ServerResponse<Request> {
     if (resolvedOptions.domain) cookie += `; Domain=${resolvedOptions.domain}`
     if (resolvedOptions.secure) cookie += '; Secure'
     if (resolvedOptions.httpOnly) cookie += '; HttpOnly'
-    if (resolvedOptions.sameSite) {
-      cookie += `; SameSite=${resolvedOptions.sameSite}`
+    if (sameSite) {
+      cookie += `; SameSite=${sameSite}`
     }
 
     this.setHeader(

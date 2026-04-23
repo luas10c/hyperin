@@ -66,6 +66,23 @@ describe('cookies middleware', () => {
     ])
   })
 
+  test('returns 500 when response.cookie uses SameSite=None without Secure', async () => {
+    const app = hyperin()
+
+    app.get('/set', ({ response }) => {
+      response.cookie('session', 'abc', { sameSite: 'None' })
+      response.send('ok')
+    })
+
+    const response: Response = await request(app).get('/set')
+
+    expect(response.status).toBe(500)
+    expect(response.body).toEqual({
+      statusCode: 500,
+      message: 'SameSite=None requires Secure'
+    })
+  })
+
   test('ignores unsafe cookie keys', async () => {
     const app = hyperin()
 

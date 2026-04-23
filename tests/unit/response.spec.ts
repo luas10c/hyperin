@@ -7,9 +7,9 @@ import { Response } from '#/response'
 function createResponse() {
   const request = new Request(new Socket())
   const response = new Response(request)
-  const end = jest.fn<(chunk?: string | Buffer) => Response>().mockReturnValue(
-    response
-  )
+  const end = jest
+    .fn<(chunk?: string | Buffer) => Response>()
+    .mockReturnValue(response)
 
   response.end = end as typeof response.end
 
@@ -52,6 +52,44 @@ describe('Response', () => {
       'session=abc; Path=/',
       'token=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly'
     ])
+  })
+
+  test('cookie normalizes sameSite casing', () => {
+    const { response } = createResponse()
+
+    response.cookie('session', 'abc', { sameSite: 'lax' })
+
+    expect(response.getHeader('Set-Cookie')).toBe(
+      'session=abc; Path=/; SameSite=Lax'
+    )
+  })
+
+  test('cookie requires secure when sameSite is none', () => {
+    const { response } = createResponse()
+
+    expect(() => {
+      response.cookie('session', 'abc', { sameSite: 'None' })
+    }).toThrow('SameSite=None requires Secure')
+  })
+
+  test('cookie rejects invalid domain characters', () => {
+    const { response } = createResponse()
+
+    expect(() => {
+      response.cookie('session', 'abc', { domain: 'example.com;evil' })
+    }).toThrow('Cookie domain contains invalid characters')
+  })
+
+  test('cookie rejects invalid path values', () => {
+    const { response } = createResponse()
+
+    expect(() => {
+      response.cookie('session', 'abc', { path: 'admin' })
+    }).toThrow('Cookie path must start with "/"')
+
+    expect(() => {
+      response.cookie('session', 'abc', { path: '/admin\nset-cookie' })
+    }).toThrow('Cookie path contains invalid characters')
   })
 
   test('ignores subsequent body writes after the response was sent', () => {
