@@ -186,9 +186,9 @@ describe('Instance integration', () => {
   test('supports async trust proxy functions through app.set', async () => {
     const app = createInstance()
 
-    app.set('trust proxy', async ({ ipAddress }) => {
+    app.set('trust proxy', async ({ remoteAddress }) => {
       await new Promise((resolve) => setTimeout(resolve, 1))
-      return ipAddress === '127.0.0.1' || ipAddress === '::1'
+      return remoteAddress === '127.0.0.1' || remoteAddress === '::1'
     })
     app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
 

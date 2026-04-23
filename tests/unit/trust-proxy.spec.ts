@@ -41,9 +41,13 @@ describe('trust proxy utilities', () => {
   })
 
   test('supports async custom trust proxy functions', async () => {
-    const trustProxy = async ({ ipAddress }: { ipAddress?: string }) => {
+    const trustProxy = async ({
+      remoteAddress
+    }: {
+      remoteAddress?: string
+    }) => {
       await new Promise((resolve) => setTimeout(resolve, 1))
-      return ipAddress === '127.0.0.1'
+      return remoteAddress === '127.0.0.1'
     }
 
     await expect(
