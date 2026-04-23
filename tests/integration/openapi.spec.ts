@@ -348,6 +348,42 @@ describe('OpenAPI integration', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
+  test('writes the generated document to file on first request when no file exists', async () => {
+    const app = hyperin()
+    const directory = await mkdtemp(join(tmpdir(), 'hyperin-openapi-'))
+    const file = join(directory, 'openapi.json')
+
+    app.get('/runtime', () => ({ ok: true }))
+
+    openapi(app, {
+      file,
+      documentation: {
+        info: {
+          title: 'Runtime API',
+          version: '2.0.0'
+        }
+      }
+    })
+
+    try {
+      const response = await request(app).get('/openapi.json')
+      const fileContent = JSON.parse(await readFile(file, 'utf8')) as Record<
+        string,
+        unknown
+      >
+
+      expect(response.status).toBe(200)
+      expect(fileContent).toEqual(response.body)
+      expect(response.body.info).toEqual({
+        title: 'Runtime API',
+        version: '2.0.0'
+      })
+      expect(response.body.paths).toEqual(expect.any(Object))
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   test('returns validation issues in the errors format', async () => {
     const app = hyperin()
 

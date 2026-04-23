@@ -103,6 +103,27 @@ describe('Instance integration', () => {
     })
   })
 
+  test('exposes forwarded ip only when trust proxy is enabled in app flow', async () => {
+    const app = createInstance()
+
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const direct: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1, 203.0.113.8')
+    expect(direct.status).toBe(200)
+    expect(direct.body).toEqual({ ip: '::ffff:127.0.0.1' })
+
+    app.enable('trust proxy')
+
+    const proxied: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1, 203.0.113.8')
+
+    expect(proxied.status).toBe(200)
+    expect(proxied.body).toEqual({ ip: '203.0.113.8' })
+  })
+
   test('shutdown closes the public server instance', async () => {
     const app = createInstance()
 
