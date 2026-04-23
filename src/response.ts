@@ -7,12 +7,40 @@ import type { Request } from './request'
 // ─────────────────────────────────────────────────────────────
 
 export interface CookieOptions {
+  /**
+   * Cookie lifetime in seconds.
+   */
   maxAge?: number
+
+  /**
+   * Absolute expiration date for the cookie.
+   */
   expires?: Date
+
+  /**
+   * Domain attribute for the cookie.
+   */
   domain?: string
+
+  /**
+   * Cookie path scope.
+   * @default '/'
+   */
   path?: string
+
+  /**
+   * Sends the cookie only over HTTPS.
+   */
   secure?: boolean
+
+  /**
+   * Prevents client-side JavaScript from reading the cookie.
+   */
   httpOnly?: boolean
+
+  /**
+   * Controls whether the cookie is sent on cross-site requests.
+   */
   sameSite?: 'Strict' | 'Lax' | 'None' | 'strict' | 'lax' | 'none'
 }
 

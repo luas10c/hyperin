@@ -3,20 +3,78 @@ import type { Response } from '#/response'
 import type { Middleware } from '#/types'
 
 export interface HstsOptions {
+  /**
+   * HSTS max-age value in seconds.
+   * @default 15552000
+   */
   maxAge?: number
+
+  /**
+   * Adds the `includeSubDomains` directive to the HSTS header.
+   * @default true
+   */
   includeSubDomains?: boolean
+
+  /**
+   * Adds the `preload` directive to the HSTS header.
+   * @default false
+   */
   preload?: boolean
 }
 
 export interface SecurityOptions {
+  /**
+   * Value for the `Content-Security-Policy` header.
+   * Set to `false` to disable it.
+   */
   contentSecurityPolicy?: string | false
+
+  /**
+   * Value for the `Cross-Origin-Opener-Policy` header.
+   * Set to `false` to disable it.
+   */
   crossOriginOpenerPolicy?: string | false
+
+  /**
+   * Value for the `Cross-Origin-Resource-Policy` header.
+   * Set to `false` to disable it.
+   */
   crossOriginResourcePolicy?: string | false
+
+  /**
+   * Enables the `Origin-Agent-Cluster` header.
+   * @default true
+   */
   originAgentCluster?: boolean
+
+  /**
+   * Value for the `Referrer-Policy` header.
+   * Set to `false` to disable it.
+   */
   referrerPolicy?: string | false
+
+  /**
+   * Enables the `X-Content-Type-Options: nosniff` header.
+   * @default true
+   */
   xContentTypeOptions?: boolean
+
+  /**
+   * Value for the `X-DNS-Prefetch-Control` header.
+   * Set to `false` to disable it.
+   */
   xDnsPrefetchControl?: 'off' | 'on' | false
+
+  /**
+   * Value for the `X-Frame-Options` header.
+   * Set to `false` to disable it.
+   */
   xFrameOptions?: 'DENY' | 'SAMEORIGIN' | false
+
+  /**
+   * Enables and configures the `Strict-Transport-Security` header.
+   * Set to `false` to disable it.
+   */
   hsts?: HstsOptions | false
 }
 

@@ -28,12 +28,34 @@ export type CompiledLoggerFormat = (
 ) => string
 
 export interface LoggerOptions {
+  /**
+   * Log the request before the response is finished.
+   * When disabled, duration and response size are included.
+   */
   immediate?: boolean
+
+  /**
+   * Skip logging for requests that match this predicate.
+   */
   skip?: (request: Request, response: Response) => boolean
+
+  /**
+   * Log format name, tokenized format string, or custom formatter.
+   */
   format?:
     | string
     | ((info: LoggerInfo, request: Request, response: Response) => string)
+
+  /**
+   * Destination stream for log output.
+   * Defaults to `process.stdout`.
+   */
   stream?: { write: (chunk: string) => boolean | void }
+
+  /**
+   * Force-enable or disable ANSI colors.
+   * By default colors are enabled only for TTY streams that support them.
+   */
   colors?: boolean
 }
 

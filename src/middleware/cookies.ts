@@ -7,7 +7,15 @@ function isUnsafePropertyKey(key: string): boolean {
 }
 
 export interface CookiesOptions {
+  /**
+   * Custom decoder applied to each cookie value before it is exposed on the request.
+   * Defaults to `decodeURIComponent` with a safe fallback.
+   */
   decode?: (value: string) => string
+
+  /**
+   * Secret or secret rotation list used to verify signed cookies.
+   */
   secret?: string | readonly string[]
 }
 

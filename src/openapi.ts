@@ -75,7 +75,14 @@ export interface DescribeOperationInput extends Omit<
 }
 
 export interface WithHeaderOptions {
+  /**
+   * Response description used in the generated OpenAPI operation.
+   */
   description?: string
+
+  /**
+   * Content type associated with the wrapped response schema.
+   */
   contentType?: string
 }
 
@@ -95,8 +102,24 @@ export interface OpenAPIDocument {
 }
 
 export interface OpenAPIOptions {
+  /**
+   * URL path used to serve the generated OpenAPI JSON document.
+   *
+   * @default '/openapi.json'
+   */
   path?: string
+
+  /**
+   * Output file path used to persist the generated OpenAPI JSON document.
+   * If not defined, the document is kept in memory only.
+   *
+   * @default undefined
+   */
   file?: string
+
+  /**
+   * Base document metadata merged into the generated OpenAPI document.
+   */
   documentation?: {
     info?: {
       title?: string
@@ -105,6 +128,11 @@ export interface OpenAPIOptions {
     }
     servers?: Array<{ url: string; description?: string }>
   }
+
+  /**
+   * Optional schema mappers keyed by constructor name.
+   * Useful for custom schema libraries or special-case JSON Schema output.
+   */
   mapJsonSchema?: Record<string, (schema: unknown) => Record<string, unknown>>
 }
 

@@ -16,15 +16,41 @@ import type { Middleware } from '#/types'
 type CompressionEncoding = 'br' | 'gzip' | 'deflate'
 
 export interface CompressOptions {
+  /**
+   * Minimum response size, in bytes, before compression is applied.
+   * @default 1024
+   */
   threshold?: number
+
+  /**
+   * Compression algorithms supported by the middleware, in priority order.
+   * @default ['br', 'gzip', 'deflate']
+   */
   encodings?: readonly CompressionEncoding[]
+
+  /**
+   * Custom predicate used to decide whether a response should be compressed.
+   * Runs after the built-in status and header checks.
+   */
   filter?: (
     contentType: string | undefined,
     request: Request,
     response: Response
   ) => boolean
+
+  /**
+   * Brotli-specific `zlib` options.
+   */
   brotli?: BrotliOptions
+
+  /**
+   * Gzip-specific `zlib` options.
+   */
   gzip?: ZlibOptions
+
+  /**
+   * Deflate-specific `zlib` options.
+   */
   deflate?: ZlibOptions
 }
 

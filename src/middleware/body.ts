@@ -14,47 +14,70 @@ function isUnsafePropertyKey(key: string): boolean {
 }
 
 export interface BodyParserOptions {
-  /** Maximum body size. Ex: '100kb', '1mb'. Default: '100kb' */
+  /**
+   * Maximum body size.
+   * Examples: `'100kb'`, `'1mb'`.
+   * @default '100kb'
+   */
   limit?: string | number
+
   /**
    * Default charset. Supports 'utf-8' and 'latin1' / 'iso-8859-1'.
-   * Default: 'utf-8'
+   * @default 'utf-8'
    */
   defaultCharset?: 'utf-8' | 'latin1'
-  /** Allows inflating (decompressing) gzip/deflate/br. */
+
+  /**
+   * Allows inflating compressed request bodies (`gzip`, `deflate`, `br`).
+   * @default true
+   */
   inflate?: boolean
-  /** Verifies the raw body before parsing. */
-  /** Throws an error to abort parsing. */
+
+  /**
+   * Verifies the raw body before parsing.
+   * Throw an error to abort parsing.
+   */
   verify?: (req: Request, res: Response, buf: Buffer, encoding: string) => void
-  /** Accepted Content-Type. Type can be string, string[] or function. */
-  /** Default for JSON: 'application/json' */
-  /** Default for URL-encoded: 'application/x-www-form-urlencoded' */
+
+  /**
+   * Accepted Content-Type matcher.
+   * Can be a string, string array or custom predicate.
+   * Default for JSON: `'application/json'`.
+   * Default for URL-encoded: `'application/x-www-form-urlencoded'`.
+   */
   type?: string | string[] | ((req: Request) => boolean)
 }
 
 export interface JsonOptions extends BodyParserOptions {
-  /** strict: only accepts object or array at the top of JSON. */
-  /** Default: true */
+  /**
+   * Only accepts objects or arrays at the top level of the JSON payload.
+   * @default true
+   */
   strict?: boolean
-  /** Reviver passed to JSON.parse. */
+
+  /**
+   * Reviver passed to `JSON.parse`.
+   */
   reviver?: (key: string, value: unknown) => unknown
 }
 
 export interface UrlencodedOptions extends BodyParserOptions {
   /**
-   * extended: usa parser rico (suporta arrays e objetos aninhados).
-   * false → querystring nativo (apenas string/string[]).
-   * Default: false
+   * Enables the rich parser that supports nested objects and arrays.
+   * When `false`, only flat string and string[] values are produced.
+   * @default false
    */
   extended?: boolean
+
   /**
-   * Profundidade máxima no modo extended.
-   * Default: 32
+   * Maximum nesting depth when `extended` mode is enabled.
+   * @default 32
    */
   depth?: number
+
   /**
    * Maximum number of parameters.
-   * Default: 1000
+   * @default 1000
    */
   parameterLimit?: number
 }

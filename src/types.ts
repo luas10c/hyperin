@@ -114,14 +114,49 @@ export type InferSchemaOutput<TSchema> = TSchema extends {
       : unknown
 
 export interface RouteSchemaOptions {
+  /**
+   * Validation schema for `request.body`.
+   */
   body?: unknown
+
+  /**
+   * Validation schema for route params extracted from the path.
+   */
   params?: unknown
+
+  /**
+   * Validation schema for `request.query`.
+   */
   query?: unknown
+
+  /**
+   * Short operation summary used in the generated OpenAPI document.
+   */
   summary?: string
+
+  /**
+   * Detailed operation description used in the generated OpenAPI document.
+   */
   description?: string
+
+  /**
+   * Explicit OpenAPI operation id.
+   */
   operationId?: string
+
+  /**
+   * OpenAPI tags attached to the operation.
+   */
   tags?: string[]
+
+  /**
+   * Marks the OpenAPI operation as deprecated.
+   */
   deprecated?: boolean
+
+  /**
+   * Additional response schemas merged into the generated OpenAPI operation.
+   */
   responses?: Record<string | number, unknown>
 }
 
@@ -255,10 +290,33 @@ export type RouteMethodArgsWithOptions<
   : never
 
 export type MultipartLimits = {
+  /**
+   * Maximum total multipart body size in bytes.
+   */
   bodySize?: number
+
+  /**
+   * Maximum size, in bytes, for each uploaded file.
+   */
   fileSize?: number
+
+  /**
+   * Maximum size, in bytes, for each non-file field value.
+   */
   fieldSize?: number
+
+  /**
+   * Maximum number of uploaded files.
+   */
   files?: number
+
+  /**
+   * Maximum number of non-file fields.
+   */
   fields?: number
+
+  /**
+   * Maximum total number of multipart parts, including files and fields.
+   */
   parts?: number
 }

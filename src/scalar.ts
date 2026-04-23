@@ -68,6 +68,9 @@ export type ScalarSearchHotKey =
 export type ScalarOrderSchemaPropertiesBy = 'alpha' | 'preserve'
 
 export interface ScalarConfiguration {
+  /**
+   * Additional Scalar UI configuration passed directly to the client.
+   */
   theme?: ScalarTheme
   layout?: ScalarLayout
   showSidebar?: boolean
@@ -92,12 +95,31 @@ export interface ScalarConfiguration {
 }
 
 export interface ScalarOptions {
-  /** @default /docs */
+  /**
+   * URL path used to serve the Scalar documentation UI.
+   * @default '/docs'
+   */
   path?: string
-  /** @default /openapi.json */
+
+  /**
+   * OpenAPI document URL consumed by the Scalar UI.
+   * @default '/openapi.json'
+   */
   url?: string
+
+  /**
+   * Shortcut for `configuration.darkMode`.
+   */
   darkMode?: boolean
+
+  /**
+   * Shortcut for `configuration.hideDarkModeToggle`.
+   */
   hideDarkModeToggle?: boolean
+
+  /**
+   * Additional Scalar UI configuration merged into the generated page.
+   */
   configuration?: ScalarConfiguration
 }
 

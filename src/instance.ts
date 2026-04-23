@@ -36,6 +36,9 @@ export type HttpMethod =
   | 'ALL'
 
 export interface RouterOptions {
+  /**
+   * Prefix applied to every route registered by the router instance.
+   */
   prefix?: string
 }
 
@@ -127,6 +130,52 @@ type RouteStep5<
 interface RouteMethod<TSelf> {
   <const TPath extends string>(
     path: TPath,
+    ...handlers: [handler: RouteStep1<TPath>]
+  ): TSelf
+  <const TPath extends string, T1 extends RouteStep1<TPath>>(
+    path: TPath,
+    ...handlers: [handler: T1, handler: RouteStep2<TPath, T1>]
+  ): TSelf
+  <
+    const TPath extends string,
+    T1 extends RouteStep1<TPath>,
+    T2 extends RouteStep2<TPath, T1>
+  >(
+    path: TPath,
+    ...handlers: [handler: T1, handler: T2, handler: RouteStep3<TPath, T1, T2>]
+  ): TSelf
+  <
+    const TPath extends string,
+    T1 extends RouteStep1<TPath>,
+    T2 extends RouteStep2<TPath, T1>,
+    T3 extends RouteStep3<TPath, T1, T2>
+  >(
+    path: TPath,
+    ...handlers: [
+      handler: T1,
+      handler: T2,
+      handler: T3,
+      handler: RouteStep4<TPath, T1, T2, T3>
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    T1 extends RouteStep1<TPath>,
+    T2 extends RouteStep2<TPath, T1>,
+    T3 extends RouteStep3<TPath, T1, T2>,
+    T4 extends RouteStep4<TPath, T1, T2, T3>
+  >(
+    path: TPath,
+    ...handlers: [
+      handler: T1,
+      handler: T2,
+      handler: T3,
+      handler: T4,
+      handler: RouteStep5<TPath, T1, T2, T3, T4>
+    ]
+  ): TSelf
+  <const TPath extends string>(
+    path: TPath,
     ...handlers: [...Handler[], RouteStep1<TPath>]
   ): TSelf
   <const TPath extends string, T1 extends RouteStep1<TPath>>(
@@ -158,13 +207,13 @@ interface RouteMethod<TSelf> {
     T4 extends RouteStep4<TPath, T1, T2, T3>
   >(
     path: TPath,
+    ...handlers: [...Handler[], T1, T2, T3, T4, RouteStep5<TPath, T1, T2, T3, T4>]
+  ): TSelf
+  <const TPath extends string, TOptions extends RouteSchemaOptions>(
+    path: TPath,
     ...handlers: [
-      ...Handler[],
-      T1,
-      T2,
-      T3,
-      T4,
-      RouteStep5<TPath, T1, T2, T3, T4>
+      handler: RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
+      options: TOptions & RouteSchemaOptions
     ]
   ): TSelf
   <const TPath extends string, TOptions extends RouteSchemaOptions>(
@@ -182,12 +231,49 @@ interface RouteMethod<TSelf> {
   >(
     path: TPath,
     ...handlers: [
+      handler: T1,
+      handler: RouteMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+      >,
+      options: TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>
+  >(
+    path: TPath,
+    ...handlers: [
       ...Handler[],
       T1,
       RouteMiddleware<
         ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
       >,
       TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >
+  >(
+    path: TPath,
+    ...handlers: [
+      handler: T1,
+      handler: T2,
+      handler: RouteMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+          T2
+        >
+      >,
+      options: TOptions & RouteSchemaOptions
     ]
   ): TSelf
   <
@@ -232,6 +318,42 @@ interface RouteMethod<TSelf> {
   >(
     path: TPath,
     ...handlers: [
+      handler: T1,
+      handler: T2,
+      handler: T3,
+      handler: RouteMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<
+            ApplyMiddleware<
+              ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
+              T1
+            >,
+            T2
+          >,
+          T3
+        >
+      >,
+      options: TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >
+    >
+  >(
+    path: TPath,
+    ...handlers: [
       ...Handler[],
       T1,
       T2,
@@ -249,6 +371,55 @@ interface RouteMethod<TSelf> {
         >
       >,
       TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
+  <
+    const TPath extends string,
+    TOptions extends RouteSchemaOptions,
+    T1 extends RouteMiddleware<
+      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
+    >,
+    T2 extends RouteMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
+    >,
+    T3 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >
+    >,
+    T4 extends RouteMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+          T2
+        >,
+        T3
+      >
+    >
+  >(
+    path: TPath,
+    ...handlers: [
+      handler: T1,
+      handler: T2,
+      handler: T3,
+      handler: T4,
+      handler: RouteMiddleware<
+        ApplyMiddleware<
+          ApplyMiddleware<
+            ApplyMiddleware<
+              ApplyMiddleware<
+                ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
+                T1
+              >,
+              T2
+            >,
+            T3
+          >,
+          T4
+        >
+      >,
+      options: TOptions & RouteSchemaOptions
     ]
   ): TSelf
   <

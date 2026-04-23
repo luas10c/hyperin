@@ -3,10 +3,34 @@ import type { Response } from '#/response'
 import type { Middleware } from '#/types'
 
 export interface TimeoutOptions {
+  /**
+   * Maximum time, in milliseconds, before the request is aborted.
+   * @default 30000
+   */
   delay?: number
+
+  /**
+   * Status code used by the default timeout response.
+   * @default 408
+   */
   statusCode?: number
+
+  /**
+   * Response body used by the default timeout response.
+   * Strings are sent as text; objects are sent as JSON.
+   * @default { error: 'Request Timeout' }
+   */
   message?: string | Record<string, unknown>
+
+  /**
+   * Skip timeout handling for requests that match this predicate.
+   */
   skip?: (request: Request, response: Response) => boolean
+
+  /**
+   * Optional hook called after the request is aborted.
+   * When provided, it is responsible for writing the timeout response.
+   */
   onTimeout?: (request: Request, response: Response) => void | Promise<void>
 }
 

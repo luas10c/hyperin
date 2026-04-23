@@ -14,8 +14,19 @@ export interface RateLimitResult {
 }
 
 export interface RateLimitStoreOptions {
+  /**
+   * Selected rate limit algorithm for the current request.
+   */
   algorithm: RateLimitAlgorithm
+
+  /**
+   * Maximum number of requests allowed in the current window or bucket.
+   */
   limit: number
+
+  /**
+   * Time window, in milliseconds, used by the store.
+   */
   windowMs: number
 }
 
@@ -28,19 +39,70 @@ export interface RateLimitStore {
 }
 
 export interface RateLimitOptions {
+  /**
+   * Rate limiting strategy used by the middleware.
+   * @default 'fixed-window'
+   */
   algorithm?: RateLimitAlgorithm
+
+  /**
+   * Maximum number of requests allowed per key within the window.
+   * Can be computed dynamically per request.
+   * @default 100
+   */
   limit?:
     | number
     | ((request: Request, response: Response) => MaybePromise<number>)
+
+  /**
+   * Window size in milliseconds.
+   * @default 60000
+   */
   windowMs?: number
+
+  /**
+   * Builds the identifier used to track each client.
+   * Defaults to the request IP address.
+   */
   keyGenerator?: (request: Request, response: Response) => MaybePromise<string>
+
+  /**
+   * Request header used as the client key when `keyGenerator` is not provided.
+   */
   keyHeader?: string
+
+  /**
+   * Custom persistence layer for counters and token buckets.
+   * Defaults to the in-memory store.
+   */
   store?: RateLimitStore
+
+  /**
+   * Status code sent when the limit is exceeded.
+   * Can be computed dynamically per request.
+   * @default 429
+   */
   statusCode?:
     | number
     | ((request: Request, response: Response) => MaybePromise<number>)
+
+  /**
+   * Enables `RateLimit-*` response headers.
+   * Both `true` and `'draft-6'` enable the current standard header set.
+   * @default true
+   */
   standardHeaders?: boolean | 'draft-6'
+
+  /**
+   * Enables legacy `X-RateLimit-*` response headers.
+   * @default false
+   */
   legacyHeaders?: boolean
+
+  /**
+   * Response body sent when the limit is exceeded.
+   * Can be static or computed per request.
+   */
   message?:
     | string
     | Record<string, unknown>
@@ -48,7 +110,16 @@ export interface RateLimitOptions {
         request: Request,
         response: Response
       ) => MaybePromise<string | Record<string, unknown>>)
+
+  /**
+   * Skip rate limiting for requests that match this predicate.
+   */
   skip?: (request: Request, response: Response) => boolean
+
+  /**
+   * Custom handler executed when a request is blocked.
+   * Receives the resolved status code, message and store result.
+   */
   handler?: (
     request: Request,
     response: Response,
@@ -60,8 +131,21 @@ export interface RateLimitOptions {
       result: RateLimitResult
     }
   ) => void | Promise<void>
+
+  /**
+   * Name of the request property used to expose the rate limit result.
+   * @default 'rateLimit'
+   */
   requestPropertyName?: string
+
+  /**
+   * Decrement the consumed hit when the response finishes with a status code below 400.
+   */
   skipSuccessfulRequests?: boolean
+
+  /**
+   * Decrement the consumed hit when the response finishes with a status code of 400 or above.
+   */
   skipFailedRequests?: boolean
 }
 
