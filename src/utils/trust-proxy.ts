@@ -4,13 +4,9 @@ import { isIP } from 'node:net'
  * Context passed to a custom `trust proxy` resolver.
  *
  * `remoteAddress` is the immediate peer connected to the app.
- * `ipAddress` is a legacy alias with the same value and should be avoided in
- * new code to prevent confusion with the final resolved client IP.
  */
 export type TrustProxyContext = {
   remoteAddress?: string
-  /** @deprecated Use `remoteAddress` instead. */
-  ipAddress?: string
 }
 
 /**
@@ -201,8 +197,7 @@ async function isTrustedHop(
   const trustProxyFunction = trustProxy as TrustProxyFunction
 
   return await trustProxyFunction({
-    remoteAddress: normalizedAddress,
-    ipAddress: normalizedAddress
+    remoteAddress: normalizedAddress
   })
 }
 
