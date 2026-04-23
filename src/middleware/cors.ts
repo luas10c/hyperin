@@ -11,15 +11,23 @@ export interface CorsOptions {
    * string     → fixed origin, e.g., 'http://example.com'
    * string[]   → list of allowed origins
    * RegExp     → tests the origin
-   * true       → reflect the origin of the request (equivalent to '*' with credentials)
+   * true       → reflect the origin of the request
    * false      → disable CORS completely
    * function   → returns the allowed origin dynamically and may be async
+   *
+   * When `credentials: true`, prefer an explicit allowlist instead of `'*'`.
    */
   origin?: string | string[] | RegExp | boolean | CorsOriginResolver
 
   methods?: string | string[]
   allowedHeaders?: string | string[]
   exposedHeaders?: string | string[]
+  /**
+   * Enables `Access-Control-Allow-Credentials: true`.
+   *
+   * Browsers reject credentialed CORS responses with `Access-Control-Allow-Origin: *`.
+   * Use a fixed origin, allowlist, regexp, or resolver when cookies or auth headers are involved.
+   */
   credentials?: boolean
   maxAge?: number
   preflightContinue?: boolean
