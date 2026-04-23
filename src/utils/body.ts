@@ -115,11 +115,11 @@ async function decodeCompressedBuffer(
     })
 
     decoder.on('end', () => resolve(Buffer.concat(chunks)))
-    decoder.on('error', (error: Error) => {
+    decoder.on('error', (error: Error & { status?: number; type?: string }) => {
       reject(
         Object.assign(new Error(error.message), {
-          status: 400,
-          type: 'encoding.invalid'
+          status: error.status ?? 400,
+          type: error.type ?? 'encoding.invalid'
         })
       )
     })
