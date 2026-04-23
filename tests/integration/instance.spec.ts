@@ -121,7 +121,7 @@ describe('Instance integration', () => {
       .set('X-Forwarded-For', '198.51.100.1, 203.0.113.8')
 
     expect(proxied.status).toBe(200)
-    expect(proxied.body).toEqual({ ip: '203.0.113.8' })
+    expect(proxied.body).toEqual({ ip: '198.51.100.1' })
   })
 
   test('shutdown closes the public server instance', async () => {

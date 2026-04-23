@@ -179,12 +179,12 @@ export class Request<
     if (trustProxyEnabled) {
       const forwarded = this.headers['x-forwarded-for']
       if (forwarded) {
-        // Take the rightmost IP — it is appended by the trusted proxy and
-        // cannot be forged by the client (who only controls leftmost values).
-        return (Array.isArray(forwarded) ? forwarded[0] : forwarded)
-          .split(',')
-          .at(-1)!
-          .trim()
+        // When proxy trust is enabled, the app expects the edge proxy to
+        // sanitize this header and expose the original client first.
+        const forwardedChain = Array.isArray(forwarded)
+          ? forwarded[0]
+          : forwarded
+        return forwardedChain.split(',')[0]!.trim()
       }
     }
     return this.socket?.remoteAddress || ''

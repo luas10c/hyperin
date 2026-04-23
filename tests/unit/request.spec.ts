@@ -55,6 +55,6 @@ describe('Request', () => {
 
     request.locals.trustProxyEnabled = true
 
-    expect(request.ipAddress).toBe('203.0.113.8')
+    expect(request.ipAddress).toBe('198.51.100.1')
   })
 })
