@@ -293,4 +293,30 @@ describe('multipart middleware', () => {
       await app.shutdown()
     }
   })
+
+  test('ignores unsafe multipart field names', async () => {
+    const app = hyperin()
+
+    app.use(multipart())
+    app.post('/upload', ({ request }) => ({
+      body: request.body,
+      files: request.files
+    }))
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .field('title', 'hello')
+      .field('__proto__', 'polluted')
+      .attach('constructor', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      body: { title: 'hello' },
+      files: {}
+    })
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
 })

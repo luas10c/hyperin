@@ -12,6 +12,10 @@ type ParsedResult = {
 const CRLF = '\r\n'
 const DOUBLE_CRLF = '\r\n\r\n'
 
+function isUnsafePropertyKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype'
+}
+
 function parseHeaders(raw: string): Record<string, string> {
   const headers: Record<string, string> = {}
   for (const line of raw.split(CRLF)) {
@@ -40,8 +44,8 @@ export async function parseMultipart(
   limits: MultipartLimits = {},
   onFile?: FileHandler
 ): Promise<ParsedResult> {
-  const fields: Record<string, string> = {}
-  const files: Record<string, unknown> = {}
+  const fields = Object.create(null) as Record<string, string>
+  const files = Object.create(null) as Record<string, unknown>
   let fieldCount = 0
   let fileCount = 0
   let partCount = 0
@@ -196,6 +200,11 @@ export async function parseMultipart(
     const filename = extractParam(disposition, 'filename')
 
     if (!fieldname) {
+      currentPart = null
+      return
+    }
+
+    if (isUnsafePropertyKey(fieldname)) {
       currentPart = null
       return
     }
