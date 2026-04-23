@@ -108,6 +108,57 @@ app.use(
 
 Avoid patterns like `cors({ origin: '*', credentials: true })` for private APIs.
 
+## Trust Proxy
+
+Use `trust proxy` only when your app is actually behind trusted reverse proxies.
+
+```ts
+app.set('trust proxy', true)
+app.set('trust proxy', 1)
+app.set('trust proxy', ['127.0.0.1', '::1', '10.0.0.0/8'])
+app.set('trust proxy', ({ remoteAddress }) => remoteAddress === '::1')
+app.set('trust proxy', async ({ remoteAddress }) => {
+  return remoteAddress === '127.0.0.1' || remoteAddress === '::1'
+})
+```
+
+Semantics:
+
+- `true`: trust every proxy hop; only safe when the app is not directly reachable
+- `1`: trust one proxy hop closest to the app
+- `string[]`: trust only exact IPs or CIDR ranges
+- `function`: decide per request from the immediate peer address
+
+Notes:
+
+- the callback should prefer `remoteAddress`; `ipAddress` is only a legacy alias for the same immediate peer value
+- the callback receives the immediate peer connected to the app, not the final resolved client IP
+- prefer explicit IP/CIDR allowlists in production
+- `enable('trust proxy')` is still supported and is equivalent to `app.set('trust proxy', true)`
+
+Common deployments:
+
+- Nginx on the same host:
+
+```ts
+app.set('trust proxy', ['127.0.0.1', '::1'])
+```
+
+- Traefik or another reverse proxy on an internal network:
+
+```ts
+app.set('trust proxy', ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'])
+```
+
+- Cloudflare in front of one local proxy hop:
+
+```ts
+// Example: Cloudflare -> Nginx -> app
+app.set('trust proxy', 2)
+```
+
+Use hop counts only when the proxy chain is stable and known. Otherwise prefer explicit allowlists.
+
 ## Validation
 
 Route methods accept any number of handlers. When you need validation and documentation, pass the route options object as the last argument.
