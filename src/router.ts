@@ -78,21 +78,7 @@ interface DynamicMatch {
   paramCount: number
 }
 
-type DynamicFallback =
-  | {
-      kind: 'param'
-      node: TrieNode
-      index: number
-      name: string
-      value: string
-      paramCount: number
-    }
-  | {
-      kind: 'wildcard'
-      node: TrieNode
-      start: number
-      paramCount: number
-    }
+type DynamicTraversalState = DynamicMatch & { index: number }
 
 function forEachPathSegment(
   path: string,
@@ -166,6 +152,11 @@ function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
   return result
 }
 
+function normalizeRoutePath(path: string): string {
+  if (path.length > 1 && path.endsWith('/')) return path.slice(0, -1)
+  return path || '/'
+}
+
 export class RadixRouter {
   private readonly root: TrieNode = createNode()
   private readonly staticRoutes = new Map<HttpMethod, Map<string, Handler[]>>()
@@ -197,6 +188,7 @@ export class RadixRouter {
   }
 
   add(method: HttpMethod, path: string, handlers: Handler[]): void {
+    path = normalizeRoutePath(path)
     this._routes.push([method, path, handlers])
 
     if (!isDynamicPath(path)) {
@@ -217,9 +209,14 @@ export class RadixRouter {
 
     forEachPathSegment(path, (segment) => {
       if (segment.startsWith(':')) {
+        const paramName = segment.slice(1)
         if (!node.paramChild) {
           node.paramChild = createNode()
-          node.paramChild.paramName = segment.slice(1)
+          node.paramChild.paramName = paramName
+        } else if (node.paramChild.paramName !== paramName) {
+          throw new TypeError(
+            `Conflicting param name for route shape: expected ":${node.paramChild.paramName}", received ":${paramName}"`
+          )
         }
         node = node.paramChild
       } else if (segment === '*') {
@@ -240,6 +237,7 @@ export class RadixRouter {
   }
 
   match(method: string, path: string): MatchResult | null {
+    path = normalizeRoutePath(path)
     const staticHandlers =
       this.staticRoutes.get(method as HttpMethod)?.get(path) ??
       this.staticRoutes.get('ALL')?.get(path)
@@ -279,15 +277,10 @@ export class RadixRouter {
       return null
     }
 
-    const dynamicMatch = this.#traverse(path)
+    const dynamicMatch = this.#traverse(method, path)
 
-    const routeHandlers = dynamicMatch?.node.isEnd
-      ? dynamicMatch.node.handlers.get(method as HttpMethod) ||
-        dynamicMatch.node.handlers.get('ALL') ||
-        // HEAD → GET fallback for dynamic routes
-        (method === 'HEAD'
-          ? (dynamicMatch.node.handlers.get('GET') ?? null)
-          : null)
+    const routeHandlers = dynamicMatch
+      ? this.#getNodeHandlers(dynamicMatch.node, method)
       : null
 
     if (dynamicMatch && routeHandlers) {
@@ -315,25 +308,40 @@ export class RadixRouter {
     return null
   }
 
-  #traverse(path: string): DynamicMatch | null {
-    const paramNames: string[] = []
-    const paramValues: string[] = []
-    const fallbacks: DynamicFallback[] = []
-    let node = this.root
-    let index = 0
-    let paramCount = 0
+  #getNodeHandlers(node: TrieNode, method: string): Handler[] | null {
+    if (!node.isEnd) return null
 
-    traverse: while (true) {
+    return (
+      node.handlers.get(method as HttpMethod) ||
+      node.handlers.get('ALL') ||
+      (method === 'HEAD' ? (node.handlers.get('GET') ?? null) : null)
+    )
+  }
+
+  #traverse(method: string, path: string): DynamicMatch | null {
+    const stack: DynamicTraversalState[] = []
+    let state: DynamicTraversalState = {
+      node: this.root,
+      index: 0,
+      paramNames: [],
+      paramValues: [],
+      paramCount: 0
+    }
+
+    while (true) {
+      const { node, index, paramCount } = state
       let start = index
       while (start < path.length && path.charCodeAt(start) === 47) start++
 
       if (start >= path.length) {
-        return {
-          node,
-          paramNames,
-          paramValues,
-          paramCount
+        if (this.#getNodeHandlers(node, method)) {
+          return state
         }
+
+        const fallback = stack.pop()
+        if (!fallback) return null
+        state = fallback
+        continue
       }
 
       let end = start + 1
@@ -343,67 +351,48 @@ export class RadixRouter {
       const segment = path.slice(start, end)
 
       if (node.wildcardChild) {
-        fallbacks.push({
-          kind: 'wildcard',
-          node: node.wildcardChild,
-          start,
-          paramCount
-        })
-      }
-
-      if (node.paramChild) {
-        fallbacks.push({
-          kind: 'param',
-          node: node.paramChild,
-          index: nextIndex,
-          name: node.paramChild.paramName!,
-          value: segment,
-          paramCount
-        })
-      }
-
-      const exactChild = node.children.get(segment)
-      if (exactChild) {
-        node = exactChild
-        index = nextIndex
-        continue
-      }
-
-      while (fallbacks.length > 0) {
-        const fallback = fallbacks.pop()!
-
-        if (fallback.kind === 'param') {
-          paramNames[fallback.paramCount] = fallback.name
-          paramValues[fallback.paramCount] = fallback.value
-          paramCount = fallback.paramCount + 1
-          node = fallback.node
-          index = fallback.index
-          continue traverse
-        }
-
         let wildcardEnd = path.length
         while (
-          wildcardEnd > fallback.start &&
+          wildcardEnd > start &&
           path.charCodeAt(wildcardEnd - 1) === 47
         ) {
           wildcardEnd--
         }
 
-        paramNames[fallback.paramCount] = '*'
-        paramValues[fallback.paramCount] = path.slice(
-          fallback.start,
-          wildcardEnd
-        )
-
-        return {
-          node: fallback.node,
-          paramNames,
-          paramValues,
-          paramCount: fallback.paramCount + 1
-        }
+        stack.push({
+          node: node.wildcardChild,
+          index: path.length,
+          paramNames: [...state.paramNames, '*'],
+          paramValues: [...state.paramValues, path.slice(start, wildcardEnd)],
+          paramCount: paramCount + 1
+        })
       }
 
-      return null
+      if (node.paramChild) {
+        stack.push({
+          node: node.paramChild,
+          index: nextIndex,
+          paramNames: [...state.paramNames, node.paramChild.paramName!],
+          paramValues: [...state.paramValues, segment],
+          paramCount: paramCount + 1
+        })
+      }
+
+      const exactChild = node.children.get(segment)
+      if (exactChild) {
+        state = {
+          node: exactChild,
+          index: nextIndex,
+          paramNames: state.paramNames,
+          paramValues: state.paramValues,
+          paramCount
+        }
+        continue
+      }
+
+      const fallback = stack.pop()
+      if (!fallback) return null
+      state = fallback
     }
   }
 
