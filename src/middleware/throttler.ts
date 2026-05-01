@@ -239,14 +239,23 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
     if (options.algorithm !== 'token-bucket') return
 
+    // Evict idle token buckets and also remove old entries to prevent unbounded memory growth
+    // Heuristic: consider an entry idle if it hasn't seen a refill in more than 2 * windowMs
+    const idleThreshold = (options.windowMs ?? 60000) * 2
     for (const [key, entry] of this.#tokenBucketEntries) {
       const elapsed = now - entry.lastRefillAt
-      const refillPerMs = options.limit / options.windowMs
+      // Regular cleanup: purge if idle for a long time
+      if (elapsed > idleThreshold) {
+        this.#tokenBucketEntries.delete(key)
+        continue
+      }
+
+      // Maintain normal behavior: refill-like calculation to see if the bucket can be kept
+      const refillPerMs = (options.limit ?? 0) / (options.windowMs ?? 1)
       const tokens = Math.min(
         options.limit,
         entry.tokens + elapsed * refillPerMs
       )
-
       if (tokens >= options.limit) {
         this.#tokenBucketEntries.delete(key)
       }
