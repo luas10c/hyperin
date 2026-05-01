@@ -6,14 +6,13 @@ import { normalizeIp } from '#/utils/trust-proxy'
 
 export type RequestParams = Record<string, unknown>
 export type RequestQuery = ParsedUrlQuery | Record<string, unknown>
+export type RequestFiles = Record<string, unknown>
 export type RequestBody =
   | Record<string, string>
   | Record<string, unknown>
   | Record<string, string | string[]>
   | string
   | undefined
-
-export type AnyRequest = Request<RequestBody, RequestParams, RequestQuery>
 
 function isUnsafePropertyKey(key: string): boolean {
   return key === '__proto__' || key === 'constructor' || key === 'prototype'
@@ -26,14 +25,15 @@ function isUnsafePropertyKey(key: string): boolean {
 export class Request<
   TBody = RequestBody,
   TParams extends RequestParams = RequestParams,
-  TQuery extends RequestQuery = RequestQuery
+  TQuery extends RequestQuery = RequestQuery,
+  TFiles extends RequestFiles = RequestFiles
 > extends IncomingMessage {
   /** Parsed route params e.g. /users/:id → req.params.id */
   params = {} as TParams
   /** Parsed body (requires json middleware) */
   body = undefined as TBody
   /** Uploaded files (requires multipart middleware) */
-  files: Record<string, unknown> = {}
+  files = {} as TFiles
   /** Parsed cookies (requires cookies middleware) */
   cookies: Record<string, string> = {}
   /** Parsed and verified signed cookies (requires cookies middleware) */

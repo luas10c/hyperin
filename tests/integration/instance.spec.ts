@@ -11,9 +11,11 @@ type ErrorResponse = {
 }
 
 describe('Instance integration', () => {
-  test('returns text when handler returns string', async () => {
+  test('returns string handler output as text with x-powered-by header enabled', async () => {
     const app = hyperin()
     app.get('/hello', () => 'ok')
+
+    app.enable('x-powered-by')
 
     const response: Response = await request(app).get('/hello')
 

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import request from 'supertest'
 
 import hyperin from '#/instance'
-import { json } from '#/middleware'
+import { json, multipart } from '#/middleware'
 import { model, openapi, clearOpenAPIRegistry } from '#/openapi'
 
 function stringSchema() {
@@ -518,6 +518,73 @@ describe('OpenAPI integration', () => {
       required: ['id', 'email'],
       additionalProperties: false
     })
+  })
+
+  test('documents multipart route bodies as multipart/form-data', async () => {
+    const app = hyperin()
+    const createUserBody = objectSchema(
+      {
+        email: stringSchema(),
+        password: stringSchema()
+      },
+      ['email', 'password']
+    )
+
+    app.post(
+      '/register',
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            description: 'User avatar image',
+            mimeTypes: ['image/png', 'image/jpeg']
+          },
+          gallery: {
+            kind: 'array',
+            description: 'Optional gallery images',
+            required: false
+          }
+        }
+      }),
+      () => ({ ok: true }),
+      {
+        body: createUserBody
+      }
+    )
+
+    openapi(app)
+
+    const documentResponse = await request(app).get('/openapi.json')
+    const operation = documentResponse.body.paths['/register'].post
+
+    expect(documentResponse.status).toBe(200)
+    expect(operation.requestBody.content['application/json']).toBeUndefined()
+    expect(operation.requestBody.content['multipart/form-data'].schema).toEqual({
+      type: 'object',
+      properties: {
+        email: { type: 'string' },
+        password: { type: 'string' },
+        avatar: {
+          type: 'string',
+          description:
+            'User avatar image\n\nAccepted MIME types: image/png, image/jpeg.',
+          format: 'binary'
+        },
+        gallery: {
+          type: 'array',
+          description: 'Optional gallery images',
+          items: { type: 'string', format: 'binary' }
+        }
+      },
+      required: ['email', 'password', 'avatar']
+    })
+    expect(operation.requestBody.content['multipart/form-data'].encoding).toEqual(
+      {
+        avatar: {
+          contentType: 'image/png, image/jpeg'
+        }
+      }
+    )
   })
 
   test('uses mapJsonSchema for vendors without native Standard JSON Schema', async () => {

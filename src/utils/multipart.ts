@@ -1,3 +1,4 @@
+import { extname, basename } from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import type {
@@ -63,6 +64,90 @@ function getNormalizedFieldConfig(
   return fieldConfigs[fieldname] ?? null
 }
 
+function normalizeMimeType(mimetype: string): string {
+  return mimetype.split(';', 1)[0].trim().toLowerCase()
+}
+
+function getReceivedMimeTypes(mimetype: string): string[] {
+  return mimetype
+    .split(',')
+    .map((value) => normalizeMimeType(value))
+    .filter(Boolean)
+}
+
+function getMimeTypeFromFilename(filename: string): string | null {
+  switch (extname(filename).toLowerCase()) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg'
+    case '.png':
+      return 'image/png'
+    case '.gif':
+      return 'image/gif'
+    case '.webp':
+      return 'image/webp'
+    case '.svg':
+      return 'image/svg+xml'
+    case '.pdf':
+      return 'application/pdf'
+    case '.txt':
+      return 'text/plain'
+    default:
+      return null
+  }
+}
+
+function isAllowedMimeType(
+  mimetype: string,
+  filename: string,
+  allowedMimeTypes: string[]
+): boolean {
+  const allowed = allowedMimeTypes.map((allowedMimeType) =>
+    normalizeMimeType(allowedMimeType)
+  )
+  const receivedMimeTypes = getReceivedMimeTypes(mimetype)
+
+  if (
+    receivedMimeTypes.some((receivedMimeType) =>
+      allowed.includes(receivedMimeType)
+    )
+  ) {
+    return true
+  }
+
+  if (!receivedMimeTypes.includes('application/octet-stream')) return false
+
+  const inferredMimeType = getMimeTypeFromFilename(filename)
+  return inferredMimeType !== null && allowed.includes(inferredMimeType)
+}
+
+function resolveFileMimeType(
+  mimetype: string,
+  filename: string,
+  allowedMimeTypes: string[] | undefined
+): string {
+  const inferredMimeType = getMimeTypeFromFilename(filename)
+  if (inferredMimeType) return inferredMimeType
+
+  const receivedMimeTypes = getReceivedMimeTypes(mimetype)
+  if (receivedMimeTypes.length === 0) return 'application/octet-stream'
+  if (!allowedMimeTypes?.length) return receivedMimeTypes[0]
+
+  const allowed = allowedMimeTypes.map((allowedMimeType) =>
+    normalizeMimeType(allowedMimeType)
+  )
+
+  return (
+    receivedMimeTypes.find((receivedMimeType) =>
+      allowed.includes(receivedMimeType)
+    ) ?? receivedMimeTypes[0]
+  )
+}
+
+function isRequiredField(config: MultipartFieldConfig): boolean {
+  return config.required !== false
+}
+
 export async function parseMultipart(
   request: Request,
   boundary: string,
@@ -76,7 +161,6 @@ export async function parseMultipart(
   } = options
   const fields = Object.create(null) as Record<string, string>
   const files = Object.create(null) as Record<string, unknown>
-  let fileCount = 0
   const totalSizeLimit = limits.totalSize ?? 10 * 1024 * 1024
   const fieldFileCounts = new Map<string, number>()
   const fieldFileSizes = new Map<string, number>()
@@ -96,6 +180,7 @@ export async function parseMultipart(
     size: number
     stream?: PassThrough
     info?: FileInfo
+    pending?: Promise<void>
   }
 
   let totalBytes = 0
@@ -205,11 +290,29 @@ export async function parseMultipart(
 
     if (part.filename !== null) {
       const config = getNormalizedFieldConfig(part.fieldname, fieldConfigs)
+      if (config?.maxFileSize !== undefined && part.size > config.maxFileSize) {
+        fail(
+          `Field "${part.fieldname}" exceeds maxFileSize limit of ${config.maxFileSize} bytes`,
+          413
+        )
+      }
+
       const nextFieldSize =
         (fieldFileSizes.get(part.fieldname) ?? 0) + part.size
-      if (config?.totalSize !== undefined && nextFieldSize > config.totalSize) {
+      let fieldTotalSizeLimit: number | undefined
+      if (config?.kind === 'array') {
+        fieldTotalSizeLimit =
+          config.maxFileSize !== undefined && config.maxFiles !== undefined
+            ? config.maxFileSize * config.maxFiles
+            : undefined
+      }
+
+      if (
+        fieldTotalSizeLimit !== undefined &&
+        nextFieldSize > fieldTotalSizeLimit
+      ) {
         fail(
-          `Field "${part.fieldname}" exceeds totalSize limit of ${config.totalSize} bytes`,
+          `Field "${part.fieldname}" exceeds totalSize limit of ${fieldTotalSizeLimit} bytes`,
           413
         )
       }
@@ -227,11 +330,23 @@ export async function parseMultipart(
 
     if (part.filename !== null) {
       part.stream?.end()
+      await part.pending
     } else {
       fields[part.fieldname] = Buffer.concat(part.buffers).toString('utf8')
     }
 
     currentPart = null
+  }
+
+  const validateRequiredFiles = (): void => {
+    if (!fieldConfigs) return
+
+    for (const [fieldname, config] of Object.entries(fieldConfigs)) {
+      if (!isRequiredField(config)) continue
+      if ((fieldFileCounts.get(fieldname) ?? 0) > 0) continue
+
+      fail(`Missing required multipart file field "${fieldname}"`, 400)
+    }
   }
 
   const startPart = (headerSection: string): void => {
@@ -256,26 +371,47 @@ export async function parseMultipart(
         fail(`Unexpected multipart file field "${fieldname}"`, 400)
       }
 
-      fileCount++
-      if (limits.files !== undefined && fileCount > limits.files) {
-        fail('Too many uploaded files', 413)
-      }
-
       const currentCount = fieldFileCounts.get(fieldname) ?? 0
       if (config?.kind === 'single' && currentCount >= 1) {
         fail(`Field "${fieldname}" only accepts a single file`, 413)
       }
-      if (config?.kind === 'array' && currentCount >= config.maxFiles) {
+      if (
+        config?.kind === 'array' &&
+        config.maxFiles !== undefined &&
+        currentCount >= config.maxFiles
+      ) {
         fail(
           `Field "${fieldname}" exceeds maxFiles limit of ${config.maxFiles}`,
           413
         )
       }
 
+      const mimetype = headers['content-type'] || 'application/octet-stream'
+      // Sanitize and normalize the incoming filename to prevent path traversal
+      const rawFilename = filename ?? 'unnamed'
+      // Keep only the basename and replace unsafe characters with underscores
+      const sanitized = basename(rawFilename).replace(/[^a-zA-Z0-9._-]/g, '_')
+      const resolvedFilename = sanitized || 'unnamed'
+      const resolvedMimeType = resolveFileMimeType(
+        mimetype,
+        resolvedFilename,
+        config?.mimeTypes
+      )
+
+      if (
+        config?.mimeTypes?.length &&
+        !isAllowedMimeType(mimetype, resolvedFilename, config.mimeTypes)
+      ) {
+        fail(
+          `Field "${fieldname}" only accepts files with MIME types: ${config.mimeTypes.join(', ')}. Received: ${normalizeMimeType(mimetype)}`,
+          415
+        )
+      }
+
       const info: FileInfo = {
         fieldname,
-        filename: filename || 'unnamed',
-        mimetype: headers['content-type'] || 'application/octet-stream',
+        filename: resolvedFilename,
+        mimetype: resolvedMimeType,
         encoding: headers['content-transfer-encoding'] || '7bit',
         size: 0
       }
@@ -329,6 +465,7 @@ export async function parseMultipart(
 
         pending.catch(() => undefined)
         pendingFiles.push(pending)
+        currentPart.pending = pending
       }
 
       return
@@ -463,6 +600,7 @@ export async function parseMultipart(
     }
 
     await Promise.all(pendingFiles)
+    validateRequiredFiles()
     return { fields, files }
   } catch (error) {
     destroyCurrentPartStream(error as Error)

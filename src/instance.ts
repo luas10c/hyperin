@@ -4,14 +4,14 @@ import {
   Server,
   ServerResponse
 } from 'node:http'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Socket } from 'node:net'
 
 import { Request } from './request'
 import { Response } from './response'
 import { errorMiddleware, RadixRouter } from './router'
 import { validate } from './validation'
-import { describeOperation } from './openapi'
-import type { DescribeOperationInput } from './openapi'
+import { describeOperation, type DescribeOperationInput } from './openapi'
 import {
   parseForwardedHeader,
   resolveTrustedClientIp,
@@ -21,7 +21,9 @@ import {
 import type {
   ApplyMiddleware,
   ApplyRouteOptions,
-  ErrorMiddleware,
+  AnyErrorHandler,
+  AnyHandler,
+  AnyMiddleware,
   Handler,
   RequestRefinement,
   RouteSchemaOptions,
@@ -48,6 +50,10 @@ export interface RouterOptions {
   prefix?: string
 }
 
+type GracefullContext = {
+  code: number
+}
+
 export interface ShutdownOptions {
   /**
    * Maximum time in ms to wait for ongoing requests to finish.
@@ -67,6 +73,26 @@ export interface ShutdownOptions {
    * OS signals to intercept. Default: ['SIGTERM', 'SIGINT']
    */
   signals?: NodeJS.Signals[]
+  /**
+   * If true (default), the process will exit after graceful shutdown completes.
+   * If false, the library will not call process.exit automatically.
+   */
+  autoExit?: boolean
+  /**
+   * Exit code to use when automatic exit is performed.
+   * Defaults to 0.
+   */
+  exitCode?: number
+  /**
+   * Exit code used when graceful shutdown or exit hooks exceed `timeout`.
+   * Defaults to 1.
+   */
+  timeoutExitCode?: number
+  /**
+   * Optional hook invoked after shutdown completes. If provided, it is
+   * called before the process exits when `autoExit` is enabled.
+   */
+  onGracefulExit?: (ctx: GracefullContext) => void | Promise<void>
 }
 
 export type AppSetting = 'x-powered-by' | 'trust proxy'
@@ -238,14 +264,6 @@ interface RouteMethod<TSelf> {
       options: TOptions & RouteSchemaOptions
     ]
   ): TSelf
-  <const TPath extends string, TOptions extends RouteSchemaOptions>(
-    path: TPath,
-    ...handlers: [
-      ...Handler[],
-      RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
-      TOptions & RouteSchemaOptions
-    ]
-  ): TSelf
   <
     const TPath extends string,
     TOptions extends RouteSchemaOptions,
@@ -494,13 +512,21 @@ interface RouteMethod<TSelf> {
       TOptions & RouteSchemaOptions
     ]
   ): TSelf
+  <const TPath extends string, TOptions extends RouteSchemaOptions>(
+    path: TPath,
+    ...handlers: [
+      ...Handler[],
+      RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
+      TOptions & RouteSchemaOptions
+    ]
+  ): TSelf
 }
 
 export interface Application extends Server<typeof Request, typeof Response> {
   use: {
-    (path: string, ...handlers: Handler[]): void
-    (handler: Handler): void
-    (handler: ErrorMiddleware): void
+    (handler: AnyErrorHandler): void
+    (handler: AnyHandler): void
+    (path: string, ...handlers: AnyHandler[]): void
   }
   /**
    * Disables a built-in boolean app setting.
@@ -545,6 +571,7 @@ export interface Application extends Server<typeof Request, typeof Response> {
   route: Hyperin['route']
   shutdown: Hyperin['shutdown']
   graceful: Hyperin['graceful']
+  gracefulExit: Hyperin['gracefulExit']
   handler: Hyperin['handler']
 }
 
@@ -662,12 +689,15 @@ class Hyperin {
   #shuttingDown = false
   // Resolves the drain Promise when #activeRequests reaches 0.
   #drainResolve: (() => void) | null = null
+  #drainTarget = 0
   // Signal handlers registered by graceful(), kept for cleanup.
   #signalHandlers: Array<{ signal: NodeJS.Signals; handler: () => void }> = []
+  #gracefulOptions: ShutdownOptions = {}
+  #requestContext = new AsyncLocalStorage<{ active: true }>()
   #routeObservers = new Set<RouteObserver>()
   #middlewareObservers = new Set<MiddlewareObserver>()
-  #xPoweredByEnabled = true
-  #trustProxy: TrustProxySetting = false
+  #xPoweredByEnabled = false
+  #trustProxyEnabled: TrustProxySetting = false
 
   constructor(opts: RouterOptions = {}) {
     this.#prefix = opts.prefix || ''
@@ -678,16 +708,17 @@ class Hyperin {
   // Middleware
   // ──────────────────────────────────────────────
 
-  use(handler: Handler | ErrorMiddleware): this
-  use(path: string, ...handlers: Handler[]): this
-  use(path: string | Handler | ErrorMiddleware, ...handlers: Handler[]): this {
+  use(handler: AnyErrorHandler): this
+  use(handler: AnyHandler): this
+  use(path: string, ...handlers: AnyHandler[]): this
+  use(path: string | AnyMiddleware, ...handlers: AnyHandler[]): this {
     if (typeof path === 'function') {
       const middlewareCount = this.#router.middlewaresList.length
       this.#router.use(path as Handler)
       if (this.#router.middlewaresList.length > middlewareCount) {
         this.#notifyMiddlewareObservers(path as Handler)
       }
-      for (const h of handlers) this.#router.use(h)
+      for (const h of handlers) this.#router.use(h as Handler)
     } else {
       const prefix = path.endsWith('/') ? path.slice(0, -1) : path
       const allHandlers = handlers
@@ -845,7 +876,7 @@ class Hyperin {
       this.#xPoweredByEnabled = false
     }
     if (setting === 'trust proxy') {
-      this.#trustProxy = false
+      this.#trustProxyEnabled = false
     }
     return this
   }
@@ -855,7 +886,7 @@ class Hyperin {
       this.#xPoweredByEnabled = true
     }
     if (setting === 'trust proxy') {
-      this.#trustProxy = true
+      this.#trustProxyEnabled = true
     }
     return this
   }
@@ -876,7 +907,7 @@ class Hyperin {
         }
       }
 
-      this.#trustProxy = value
+      this.#trustProxyEnabled = value
       return this
     }
 
@@ -1044,7 +1075,7 @@ class Hyperin {
       finalized = true
       socket._busy = false
       this.#activeRequests--
-      if (this.#shuttingDown && this.#activeRequests === 0) {
+      if (this.#shuttingDown && this.#activeRequests <= this.#drainTarget) {
         this.#drainResolve?.()
       }
     }
@@ -1059,17 +1090,17 @@ class Hyperin {
     })
 
     // Expose app-level proxy trust settings to the request instance
-    request.locals.trustProxy = this.#trustProxy
+    request.locals.trustProxy = this.#trustProxyEnabled
     request.locals.trustedClientIp = await resolveTrustedClientIp(
       request.socket?.remoteAddress,
       request.headers['x-forwarded-for'],
-      this.#trustProxy
+      this.#trustProxyEnabled
     )
 
     if (
       await shouldTrustForwardedHeaders(
         request.socket?.remoteAddress,
-        this.#trustProxy
+        this.#trustProxyEnabled
       )
     ) {
       request.locals.trustedForwardedProtocol = parseForwardedHeader(
@@ -1153,10 +1184,12 @@ class Hyperin {
 
     context.next = next
 
-    const initialResult = dispatchNext()
-    if (isPromiseLike(initialResult)) {
-      await initialResult
-    }
+    await this.#requestContext.run({ active: true }, async () => {
+      const initialResult = dispatchNext()
+      if (isPromiseLike(initialResult)) {
+        await initialResult
+      }
+    })
   }
 
   async #runErrorMiddlewares(
@@ -1250,12 +1283,12 @@ class Hyperin {
     this.#shuttingDown = true
 
     const timeout = options.timeout ?? 10_000
+    this.#drainTarget = this.#requestContext.getStore() ? 1 : 0
 
     // Step 1 — stop accepting new TCP connections
-    await new Promise<void>((resolve) => {
-      if (!this.#server) return resolve()
-      this.#server.close(() => resolve())
-    })
+    if (this.#server?.listening) {
+      this.#server.close(() => undefined)
+    }
 
     // Step 2 — destroy sockets that are idle (no request in flight).
     // Sockets currently serving a request are left open; they'll be
@@ -1269,27 +1302,121 @@ class Hyperin {
     }
 
     // Step 3 — wait for in-flight requests to drain, with a hard timeout
-    if (this.#activeRequests > 0) {
+    if (this.#activeRequests > this.#drainTarget) {
+      let timeoutTimer: NodeJS.Timeout | undefined
+
       await Promise.race([
         new Promise<void>((resolve) => {
+          if (this.#activeRequests <= this.#drainTarget) {
+            resolve()
+            return
+          }
           this.#drainResolve = resolve
         }),
         new Promise<void>((resolve) => {
-          setTimeout(() => {
+          timeoutTimer = setTimeout(() => {
             // Timeout exceeded — destroy whatever sockets are left
-            for (const socket of this.#openSockets) socket.destroy()
-            this.#openSockets.clear()
+            this.#destroyOpenSockets()
             resolve()
           }, timeout)
+          timeoutTimer.unref?.()
         })
       ])
+
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer)
+      }
     }
 
     // Step 4 — run the appropriate callback
-    if (this.#activeRequests > 0 && options.onTimeout) {
+    if (this.#activeRequests > this.#drainTarget && options.onTimeout) {
       await options.onTimeout()
     } else if (options.onShutdown) {
       await options.onShutdown()
+    }
+  }
+
+  #destroyOpenSockets(): void {
+    for (const socket of this.#openSockets) socket.destroy()
+    this.#openSockets.clear()
+  }
+
+  async #finishGracefulExit(
+    options: ShutdownOptions,
+    exitCode: number
+  ): Promise<void> {
+    if (options.onGracefulExit) {
+      const timeout = options.timeout ?? 10_000
+      const timeoutExitCode = options.timeoutExitCode ?? 1
+      let timeoutTimer: NodeJS.Timeout | undefined
+
+      const completed = await Promise.race([
+        Promise.resolve(options.onGracefulExit({ code: exitCode })).then(
+          () => true
+        ),
+        new Promise<boolean>((resolve) => {
+          timeoutTimer = setTimeout(() => {
+            this.#destroyOpenSockets()
+            resolve(false)
+          }, timeout)
+          timeoutTimer.unref?.()
+        })
+      ])
+
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer)
+      }
+
+      if (!completed) {
+        if (options.autoExit ?? true) {
+          process.exit(timeoutExitCode)
+        }
+
+        throw new Error('Graceful exit timed out')
+      }
+    }
+
+    if (options.autoExit ?? true) {
+      process.exit(exitCode)
+    }
+  }
+
+  /**
+   * Runs graceful shutdown and then exits with the provided code.
+   * Use this instead of calling `process.exit(code)` directly when cleanup matters.
+   */
+  async gracefulExit(
+    exitCode = 0,
+    options: ShutdownOptions = {}
+  ): Promise<void> {
+    const exitOptions = { ...this.#gracefulOptions, ...options, exitCode }
+
+    try {
+      await this.shutdown(exitOptions)
+    } catch (error) {
+      this.#destroyOpenSockets()
+
+      if (exitOptions.autoExit ?? true) {
+        process.exit(exitOptions.timeoutExitCode ?? 1)
+        return
+      }
+
+      throw error
+    }
+
+    try {
+      await this.#finishGracefulExit(exitOptions, exitCode)
+    } catch (error) {
+      this.#destroyOpenSockets()
+
+      if (exitOptions.autoExit ?? true) {
+        process.exit(exitOptions.timeoutExitCode ?? 1)
+        return
+      }
+
+      if (!(exitOptions.autoExit ?? true)) {
+        throw error
+      }
     }
   }
 
@@ -1303,38 +1430,21 @@ class Hyperin {
    * app.graceful({ timeout: 15_000, onShutdown: () => db.close() })
    */
   graceful(options: ShutdownOptions = {}): this {
+    this.#gracefulOptions = { ...this.#gracefulOptions, ...options }
     const signals =
       options.signals ?? (['SIGTERM', 'SIGINT'] as NodeJS.Signals[])
 
     for (const signal of signals) {
       const handler = () => {
-        this.shutdown(options)
-          .then(() => process.exit(0))
-          .catch(() => process.exit(1))
+        this.gracefulExit(this.#gracefulOptions.exitCode ?? 0).catch(
+          () => undefined
+        )
       }
       process.once(signal, handler)
       this.#signalHandlers.push({ signal, handler })
     }
 
     return this
-  }
-
-  /**
-   * Immediately closes the server and destroys all sockets.
-   * Does not wait for in-flight requests — use `shutdown()` for that.
-   * Primarily useful in tests.
-   */
-  close(callback?: (err?: Error) => void): void {
-    // Clean up signal handlers to prevent leaks across test runs
-    for (const { signal, handler } of this.#signalHandlers) {
-      process.removeListener(signal, handler)
-    }
-    this.#signalHandlers = []
-
-    for (const socket of this.#openSockets) socket.destroy()
-    this.#openSockets.clear()
-
-    this.#server?.close(callback)
   }
 
   /** Returns a Node.js-compatible request handler (for testing / serverless) */
@@ -1373,19 +1483,16 @@ export function hyperin(): Application {
   })
   core.attachServer(server)
 
-  function use(path: string, ...handlers: Handler[]): void
-  function use(handler: Handler): void
-  function use(handler: ErrorMiddleware): void
-  function use(
-    path: string | Handler | ErrorMiddleware,
-    ...handlers: Handler[]
-  ): void {
+  function use(handler: AnyErrorHandler): void
+  function use(handler: AnyHandler): void
+  function use(path: string, ...handlers: AnyHandler[]): void
+  function use(path: string | AnyMiddleware, ...handlers: AnyHandler[]): void {
     if (typeof path === 'string') {
       core.use(path, ...handlers)
       return
     }
 
-    core.use(path)
+    ;(core.use as (handler: AnyMiddleware) => Hyperin)(path)
   }
 
   function createRouteMethod(
@@ -1437,6 +1544,7 @@ export function hyperin(): Application {
     route: core.route.bind(core),
     shutdown: core.shutdown.bind(core),
     graceful: core.graceful.bind(core),
+    gracefulExit: core.gracefulExit.bind(core),
     handler: core.handler
   }) as Application
 

@@ -43,7 +43,13 @@ export interface OpenAPIParameter {
 export interface OpenAPIRequestBody {
   required?: boolean
   description?: string
-  content: Record<string, { schema: OpenAPISchema }>
+  content: Record<
+    string,
+    {
+      schema: OpenAPISchema
+      encoding?: Record<string, { contentType: string }>
+    }
+  >
 }
 
 export interface OpenAPIOperation {
@@ -208,6 +214,8 @@ const hyperinCoreKey = Symbol.for('hyperin.core')
 const operationMetadataKey = Symbol.for('hyperin.openapi.operation')
 const fragmentMetadataKey = Symbol.for('hyperin.openapi.fragment')
 const modelMetadataKey = Symbol.for('hyperin.openapi.models')
+const multipartMiddlewareKey = Symbol.for('hyperin.multipart.middleware')
+const multipartFieldsKey = Symbol.for('hyperin.multipart.fields')
 
 function normalizePath(path: string | undefined, fallback: string): string {
   if (!path || path === '') return fallback
@@ -1211,6 +1219,236 @@ function mergeOperation(
   }
 }
 
+function isMultipartMiddleware(handler: Handler): boolean {
+  return (
+    (handler as unknown as Record<symbol, unknown>)[multipartMiddlewareKey] ===
+    true
+  )
+}
+
+function getMultipartFields(handler: Handler): Record<string, unknown> | null {
+  const fields = (handler as unknown as Record<symbol, unknown>)[
+    multipartFieldsKey
+  ]
+
+  return fields && typeof fields === 'object' && !Array.isArray(fields)
+    ? (fields as Record<string, unknown>)
+    : null
+}
+
+function createMultipartFieldDescription(config: unknown): string | undefined {
+  if (!config || typeof config !== 'object') return undefined
+
+  const fieldConfig = config as {
+    description?: unknown
+    maxFileSize?: unknown
+    maxFiles?: unknown
+    mimeTypes?: unknown
+  }
+  const descriptionParts: string[] = []
+
+  if (typeof fieldConfig.description === 'string') {
+    descriptionParts.push(fieldConfig.description)
+  }
+
+  if (
+    Array.isArray(fieldConfig.mimeTypes) &&
+    fieldConfig.mimeTypes.length > 0
+  ) {
+    descriptionParts.push(
+      `Accepted MIME types: ${fieldConfig.mimeTypes.join(', ')}.`
+    )
+  }
+
+  if (typeof fieldConfig.maxFileSize === 'number') {
+    descriptionParts.push(
+      `Maximum file size: ${fieldConfig.maxFileSize} bytes.`
+    )
+  }
+
+  if (typeof fieldConfig.maxFiles === 'number') {
+    descriptionParts.push(`Maximum files: ${fieldConfig.maxFiles}.`)
+  }
+
+  return descriptionParts.length > 0 ? descriptionParts.join('\n\n') : undefined
+}
+
+function createMultipartFieldSchema(config: unknown): OpenAPISchema {
+  const fieldDescription = createMultipartFieldDescription(config)
+  const description = fieldDescription ? { description: fieldDescription } : {}
+
+  if (
+    config &&
+    typeof config === 'object' &&
+    (config as { kind?: unknown }).kind === 'array'
+  ) {
+    return {
+      type: 'array',
+      ...description,
+      items: {
+        type: 'string',
+        format: 'binary'
+      }
+    }
+  }
+
+  return {
+    type: 'string',
+    ...description,
+    format: 'binary'
+  }
+}
+
+function getMultipartRequiredFields(
+  fields: Record<string, unknown> | null
+): string[] {
+  if (!fields) return []
+
+  return Object.entries(fields)
+    .filter(([, config]) => {
+      return !(
+        config &&
+        typeof config === 'object' &&
+        (config as { required?: unknown }).required === false
+      )
+    })
+    .map(([name]) => name)
+}
+
+function createMultipartEncoding(
+  fields: Record<string, unknown> | null
+): Record<string, { contentType: string }> | undefined {
+  if (!fields) return undefined
+
+  const encoding = Object.fromEntries(
+    Object.entries(fields).flatMap(([name, config]) => {
+      if (!config || typeof config !== 'object') return []
+
+      const mimeTypes = (config as { mimeTypes?: unknown }).mimeTypes
+      if (!Array.isArray(mimeTypes) || mimeTypes.length === 0) return []
+
+      return [
+        [
+          name,
+          {
+            contentType: mimeTypes.join(', ')
+          }
+        ]
+      ]
+    })
+  )
+
+  return Object.keys(encoding).length > 0 ? encoding : undefined
+}
+
+function createMultipartFieldsSchema(
+  fields: Record<string, unknown> | null
+): OpenAPISchema | null {
+  if (!fields) return null
+
+  return {
+    type: 'object',
+    properties: Object.fromEntries(
+      Object.entries(fields).map(([name, config]) => [
+        name,
+        createMultipartFieldSchema(config)
+      ])
+    ),
+    required: getMultipartRequiredFields(fields)
+  }
+}
+
+function mergeMultipartSchemaFields(
+  schema: OpenAPISchema,
+  fieldsSchema: OpenAPISchema | null
+): OpenAPISchema {
+  if (!fieldsSchema?.properties) return schema
+
+  return {
+    ...schema,
+    type: schema.type ?? 'object',
+    properties: {
+      ...(schema.properties ?? {}),
+      ...fieldsSchema.properties
+    },
+    required: [
+      ...new Set([...(schema.required ?? []), ...(fieldsSchema.required ?? [])])
+    ]
+  }
+}
+
+function applyMultipartRequestBody(
+  operation: OpenAPIOperation,
+  fields: Record<string, unknown> | null
+): OpenAPIOperation {
+  const fieldsSchema = createMultipartFieldsSchema(fields)
+  const encoding = createMultipartEncoding(fields)
+  const requestBody = operation.requestBody
+  const jsonContent = requestBody?.content['application/json']
+  const multipartContent = requestBody?.content['multipart/form-data']
+
+  if (!requestBody && fieldsSchema) {
+    return {
+      ...operation,
+      requestBody: {
+        content: {
+          'multipart/form-data': {
+            schema: fieldsSchema,
+            ...(encoding ? { encoding } : {})
+          }
+        }
+      }
+    }
+  }
+
+  if (requestBody && multipartContent) {
+    return {
+      ...operation,
+      requestBody: {
+        ...requestBody,
+        content: {
+          ...requestBody.content,
+          'multipart/form-data': {
+            schema: mergeMultipartSchemaFields(
+              multipartContent.schema,
+              fieldsSchema
+            ),
+            ...(multipartContent.encoding || encoding
+              ? {
+                  encoding: {
+                    ...(multipartContent.encoding ?? {}),
+                    ...(encoding ?? {})
+                  }
+                }
+              : {})
+          }
+        }
+      }
+    }
+  }
+
+  if (!requestBody || !jsonContent) {
+    return operation
+  }
+
+  const content = { ...requestBody.content }
+  delete content['application/json']
+
+  return {
+    ...operation,
+    requestBody: {
+      ...requestBody,
+      content: {
+        ...content,
+        'multipart/form-data': {
+          schema: mergeMultipartSchemaFields(jsonContent.schema, fieldsSchema),
+          ...(encoding ? { encoding } : {})
+        }
+      }
+    }
+  }
+}
+
 function setHandlerMetadata<T>(
   handler: T,
   key: symbol,
@@ -1343,11 +1581,22 @@ async function resolveRouteOperation(
   context: OpenAPIConversionContext
 ): Promise<OpenAPIOperation | undefined> {
   let operation = route.operation
+  let usesMultipart = false
+  let multipartFields: Record<string, unknown> | null = null
 
   for (const handler of route.handlers ?? []) {
+    if (isMultipartMiddleware(handler)) {
+      usesMultipart = true
+      multipartFields = getMultipartFields(handler) ?? multipartFields
+    }
+
     const fragment = await extractHandlerOperation(handler, context)
     if (Object.keys(fragment).length === 0) continue
     operation = mergeOperation(operation, fragment)
+  }
+
+  if (operation && usesMultipart) {
+    operation = applyMultipartRequestBody(operation, multipartFields)
   }
 
   return operation

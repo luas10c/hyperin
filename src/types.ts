@@ -1,6 +1,12 @@
 import type { ParsedUrlQuery } from 'node:querystring'
 
-import type { AnyRequest, Request } from './request'
+import type {
+  Request,
+  RequestBody,
+  RequestFiles,
+  RequestParams,
+  RequestQuery
+} from './request'
 import type { Response } from './response'
 
 export type NextFunction = (error?: Error) => void | Promise<void>
@@ -33,6 +39,7 @@ export type RequestRefinement = {
   body?: unknown
   params?: Record<string, unknown>
   query?: Record<string, unknown>
+  files?: Record<string, unknown>
 }
 
 export interface StandardSchemaV1Issue {
@@ -170,10 +177,19 @@ export interface TypedMiddleware<
 
 export type Handler<TRequest extends Request = Request> =
   TypedMiddleware<TRequest>
-export type AnyMiddleware = TypedMiddleware<AnyRequest, RequestRefinement>
 export type ErrorMiddleware<TRequest extends Request = Request> = (
   ctx: ErrorContext<TRequest>
 ) => void | Promise<void>
+export type ErrorHandler<TRequest extends Request = Request> =
+  ErrorMiddleware<TRequest>
+export type AnyHandler = TypedMiddleware<
+  Request<RequestBody, RequestParams, RequestQuery, RequestFiles>,
+  RequestRefinement
+>
+export type AnyErrorHandler = ErrorHandler<
+  Request<RequestBody, RequestParams, RequestQuery, RequestFiles>
+>
+export type AnyMiddleware = AnyHandler | AnyErrorHandler
 
 type MergeRefinement<
   TRequest extends Request,
@@ -185,7 +201,10 @@ type MergeRefinement<
     : TRequest['params'],
   TRefinement extends { query: infer TQuery extends Record<string, unknown> }
     ? TQuery
-    : TRequest['query']
+    : TRequest['query'],
+  TRefinement extends { files: infer TFiles extends Record<string, unknown> }
+    ? TFiles
+    : TRequest['files']
 >
 
 export type ApplyMiddleware<TRequest extends Request, TMiddleware> =
@@ -258,7 +277,8 @@ export type ApplyRouteOptions<
     ? InferSchemaOutput<TQuery> extends Record<string, unknown>
       ? InferSchemaOutput<TQuery>
       : TRequest['query']
-    : TRequest['query']
+    : TRequest['query'],
+  TRequest['files']
 >
 
 export type RouteHandlerArgs<
@@ -290,11 +310,6 @@ export type RouteMethodArgsWithOptions<
   : never
 
 export type MultipartLimits = {
-  /**
-   * Maximum number of uploaded files across the whole request.
-   */
-  files?: number
-
   /**
    * Maximum total multipart payload size in bytes.
    */

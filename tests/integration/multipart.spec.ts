@@ -192,7 +192,7 @@ describe('multipart middleware', () => {
     expect(response.body).toEqual({ files: {} })
   })
 
-  test('returns 413 when a single file field exceeds its totalSize limit', async () => {
+  test('returns 413 when a single file field exceeds its maxFileSize limit', async () => {
     const app = hyperin()
 
     app.use(
@@ -200,7 +200,7 @@ describe('multipart middleware', () => {
         fields: {
           avatar: {
             kind: 'single',
-            totalSize: 2
+            maxFileSize: 2
           }
         }
       })
@@ -220,8 +220,403 @@ describe('multipart middleware', () => {
     expect(response.status).toBe(413)
     expect(response.body).toEqual({
       statusCode: 413,
-      error: 'Field "avatar" exceeds totalSize limit of 2 bytes',
+      error: 'Field "avatar" exceeds maxFileSize limit of 2 bytes',
       method: 'POST'
+    })
+  })
+
+  test('returns maxFileSize errors before the multipart request finishes', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            maxFileSize: 2
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const server = app.listen(0)
+    const address = server.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+    const boundary = 'early-limit-boundary'
+    const bodyStart =
+      `--${boundary}\r\n` +
+      'Content-Disposition: form-data; name="avatar"; filename="a.txt"\r\n' +
+      'Content-Type: text/plain\r\n\r\n' +
+      'a'.repeat(64)
+
+    try {
+      const response = await new Promise<{ status: number; body: string }>(
+        (resolve, reject) => {
+          const req = sendHttpRequest(
+            {
+              method: 'POST',
+              port,
+              path: '/upload',
+              headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': String(1024)
+              }
+            },
+            (res) => {
+              const chunks: Buffer[] = []
+              res.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+              res.on('end', () => {
+                req.destroy()
+                resolve({
+                  status: res.statusCode ?? 0,
+                  body: Buffer.concat(chunks).toString('utf8')
+                })
+              })
+            }
+          )
+
+          req.on('error', (error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ECONNRESET') reject(error)
+          })
+          req.write(bodyStart)
+        }
+      )
+
+      expect(response.status).toBe(413)
+      expect(JSON.parse(response.body)).toEqual({
+        statusCode: 413,
+        error: 'Field "avatar" exceeds maxFileSize limit of 2 bytes',
+        method: 'POST'
+      })
+    } finally {
+      await app.shutdown()
+    }
+  })
+
+  test('returns 400 when a required file field is missing', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single'
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .field('title', 'hello')
+
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual({
+      statusCode: 400,
+      error: 'Missing required multipart file field "avatar"',
+      method: 'POST'
+    })
+  })
+
+  test('allows missing file fields when required is false', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            required: false
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => ({
+      body: request.body,
+      files: request.files
+    }))
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .field('title', 'hello')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      body: { title: 'hello' },
+      files: {}
+    })
+  })
+
+  test('returns 413 when an array file exceeds its maxFileSize limit', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          gallery: {
+            kind: 'array',
+            maxFiles: 2,
+            maxFileSize: 2
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('gallery', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      statusCode: 413,
+      error: 'Field "gallery" exceeds maxFileSize limit of 2 bytes',
+      method: 'POST'
+    })
+  })
+
+  test('accepts unlimited array files and sizes when limits are omitted', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          gallery: {
+            kind: 'array'
+          }
+        },
+        onFile: async ({ stream, info }) => {
+          stream.resume()
+          return info
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('gallery', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+      .attach('gallery', Buffer.from('defg'), {
+        filename: 'b.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.gallery).toEqual([
+      expect.objectContaining({ filename: 'a.txt', size: 3 }),
+      expect.objectContaining({ filename: 'b.txt', size: 4 })
+    ])
+  })
+
+  test('processes single and array file fields without reusing streams', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single'
+          },
+          photos: {
+            kind: 'array'
+          }
+        },
+        onFile: async ({ stream, info }) => {
+          const chunks: Buffer[] = []
+
+          for await (const chunk of stream) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          }
+
+          return {
+            ...info,
+            content: Buffer.concat(chunks).toString('utf8')
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('avatar', Buffer.from('avatar'), {
+        filename: 'avatar.jpg',
+        contentType: 'image/jpeg'
+      })
+      .attach('photos', Buffer.from('photo-1'), {
+        filename: 'photo-1.jpg',
+        contentType: 'image/jpeg'
+      })
+      .attach('photos', Buffer.from('photo-2'), {
+        filename: 'photo-2.jpg',
+        contentType: 'image/jpeg'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      avatar: expect.objectContaining({
+        fieldname: 'avatar',
+        filename: 'avatar.jpg',
+        content: 'avatar'
+      }),
+      photos: [
+        expect.objectContaining({
+          fieldname: 'photos',
+          filename: 'photo-1.jpg',
+          content: 'photo-1'
+        }),
+        expect.objectContaining({
+          fieldname: 'photos',
+          filename: 'photo-2.jpg',
+          content: 'photo-2'
+        })
+      ]
+    })
+  })
+
+  test('rejects file fields with unsupported MIME types', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            mimeTypes: ['image/png', 'image/jpeg']
+          }
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('avatar', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(415)
+    expect(response.body).toEqual({
+      statusCode: 415,
+      error:
+        'Field "avatar" only accepts files with MIME types: image/png, image/jpeg. Received: text/plain',
+      method: 'POST'
+    })
+  })
+
+  test('accepts generic octet-stream uploads when filename extension matches mimeTypes', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            mimeTypes: ['image/png', 'image/jpg', 'image/jpeg']
+          }
+        },
+        onFile: async ({ stream, info }) => {
+          stream.resume()
+          return info
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('avatar', Buffer.from('abc'), {
+        filename: '292553415_442224927910336_3444365576393536002_n.jpg',
+        contentType: 'application/octet-stream'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.avatar).toEqual(
+      expect.objectContaining({
+        filename: '292553415_442224927910336_3444365576393536002_n.jpg',
+        mimetype: 'image/jpeg'
+      })
+    )
+  })
+
+  test('accepts multipart content type lists sent from OpenAPI encoding', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single',
+            mimeTypes: ['image/png', 'image/jpg', 'image/jpeg']
+          }
+        },
+        onFile: async ({ stream, info }) => {
+          stream.resume()
+          return info
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('avatar', Buffer.from('abc'), {
+        filename: 'avatar.jpg',
+        contentType: 'image/png, image/jpg, image/jpeg'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.avatar).toEqual(
+      expect.objectContaining({
+        filename: 'avatar.jpg',
+        mimetype: 'image/jpeg'
+      })
+    )
+  })
+
+  test('accepts any file type when mimeTypes is omitted', async () => {
+    const app = hyperin()
+
+    app.use(
+      multipart({
+        fields: {
+          avatar: {
+            kind: 'single'
+          }
+        },
+        onFile: async ({ stream, info }) => {
+          stream.resume()
+          return info
+        }
+      })
+    )
+    app.post('/upload', ({ request }) => request.files)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .attach('avatar', Buffer.from('abc'), {
+        filename: 'a.txt',
+        contentType: 'text/plain'
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      avatar: {
+        fieldname: 'avatar',
+        filename: 'a.txt',
+        mimetype: 'text/plain',
+        encoding: '7bit',
+        size: 3
+      }
     })
   })
 
@@ -335,7 +730,7 @@ describe('multipart middleware', () => {
     })
   })
 
-  test('rejects multipart bodies with too many uploaded files', async () => {
+  test('rejects array file fields with too many uploaded files', async () => {
     const app = hyperin()
 
     app.use(
@@ -343,11 +738,9 @@ describe('multipart middleware', () => {
         fields: {
           gallery: {
             kind: 'array',
-            maxFiles: 10
+            maxFiles: 10,
+            maxFileSize: 1024
           }
-        },
-        limits: {
-          files: 10
         }
       })
     )
@@ -366,7 +759,7 @@ describe('multipart middleware', () => {
     expect(response.status).toBe(413)
     expect(response.body).toEqual({
       statusCode: 413,
-      error: 'Too many uploaded files',
+      error: 'Field "gallery" exceeds maxFiles limit of 10',
       method: 'POST'
     })
   })
@@ -379,7 +772,7 @@ describe('multipart middleware', () => {
         fields: {
           avatar: {
             kind: 'single',
-            totalSize: 1024
+            maxFileSize: 1024
           }
         }
       })
@@ -410,7 +803,7 @@ describe('multipart middleware', () => {
           gallery: {
             kind: 'array',
             maxFiles: 2,
-            totalSize: 32
+            maxFileSize: 16
           }
         },
         onFile: async ({

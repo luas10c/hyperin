@@ -1,4 +1,10 @@
-import type { AnyRequest, Request } from './request'
+import type {
+  Request,
+  RequestBody,
+  RequestFiles,
+  RequestParams,
+  RequestQuery
+} from './request'
 import type {
   Middleware,
   InferSchemaOutput,
@@ -134,7 +140,7 @@ export const validate = {
     schema: TSchema
   ) =>
     createValidator('body', schema) as TypedMiddleware<
-      AnyRequest,
+      Request<RequestBody, RequestParams, RequestQuery, RequestFiles>,
       ValidateBodyRefinement<TBody>
     >,
   params: <
@@ -147,7 +153,7 @@ export const validate = {
     schema: TSchema
   ) =>
     createValidator('params', schema) as TypedMiddleware<
-      AnyRequest,
+      Request<RequestBody, RequestParams, RequestQuery, RequestFiles>,
       ValidateParamsRefinement<TParams>
     >,
   query: <
@@ -160,7 +166,7 @@ export const validate = {
     schema: TSchema
   ) =>
     createValidator('query', schema) as TypedMiddleware<
-      AnyRequest,
+      Request<RequestBody, RequestParams, RequestQuery, RequestFiles>,
       ValidateQueryRefinement<TQuery>
     >
 }
