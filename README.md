@@ -1,8 +1,17 @@
-[![Hyperin Logo](https://github.com/luas10c/hyperin/blob/main/hyperin.png?raw=true)](https://github.com/luas10c/hyperin)
-
-Fast, modern, minimalist web framework for Node.js.
-
-Hyperin is built for HTTP APIs and web services with a small surface area, strong defaults, and focus on performance.
+<br>
+<div align="center">
+  <img src="https://github.com/luas10c/hyperin/blob/main/hyperin.png?raw=true" alt="Hyperin">
+</div>
+<p align="center">Fast, modern, minimalist web framework for Node.js.</p>
+<div align="center">
+  <a href="https://npm.im/hyperin"><img src="https://badgen.net/npm/v/hyperin"></a>
+  <a href="https://npm.im/hyperin"><img src="https://badgen.net/npm/dm/hyperin"></a>
+  <a href="https://npm.im/hyperin"><img src="https://img.shields.io/badge/ESLint-3A33D1?logo=eslint" alt="eslint"></a>
+  <a href="https://npm.im/hyperin"><img src="https://img.shields.io/badge/Prettier-21323b?logo=prettier&logoColor=ffffff" alt="prettier"></a>
+  <a href="https://npm.im/hyperin"><img src="https://img.shields.io/github/license/luas10c/hyperin" alt="github license"></a>
+</div>
+<br><br>
+Hyperin is lightweight HTTP tooling for high-performance Node.js services, combining an Express-like feel with a modern, focused core.
 
 ## Installation
 
@@ -31,11 +40,7 @@ const app = hyperin()
 
 app.use(json())
 
-app.get('/', () => {
-  return {
-    message: 'Hello World'
-  }
-})
+app.get('/', () => ({ message: 'Hello World' }))
 
 app.post('/users', ({ request, response }) => {
   response.status(201)
@@ -46,16 +51,10 @@ app.post('/users', ({ request, response }) => {
   }
 })
 
-app.listen(3000, () => {
+app.listen(3000, '0.0.0.0' () => {
   console.log('Server running at http://localhost:3000')
 })
 ```
-
-## Philosophy
-
-Hyperin aims to provide small, robust HTTP tooling without forcing a heavy architecture.
-
-It should feel familiar if you come from Express, while offering a modern core, built-in middleware, and a more focused API for high-performance Node.js services.
 
 ## Basic Usage
 
