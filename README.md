@@ -68,8 +68,6 @@ app.get('/users/:id', ({ request }) => {
 app.use('/api', async ({ next }) => {
   await next()
 })
-
-app.disable('x-powered-by')
 ```
 
 ## Built-In Middleware
