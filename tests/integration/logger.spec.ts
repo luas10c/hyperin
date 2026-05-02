@@ -1,105 +1,141 @@
 import { describe, expect, jest, test } from '@jest/globals'
-import request, { type Response } from 'supertest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import request from 'supertest'
 
 import hyperin from '#/instance'
-import { logger } from '#/middleware/logger'
+import { logger, type LoggerEvent } from '#/logger'
 
-function stripAnsi(value: string): string {
-  return value.replaceAll('\u001B', '').replace(/\[[0-9;]*m/g, '')
-}
-
-describe('logger middleware', () => {
-  test('logs a line with response data when finishing', async () => {
-    const write = jest.fn<(chunk: string) => boolean>().mockReturnValue(true)
+describe('logger plugin', () => {
+  test('registers structured request logging on the app', async () => {
+    const events: LoggerEvent[] = []
     const app = hyperin()
 
-    app.use(logger({ stream: { write }, colors: true }))
+    const returned = logger(app, {
+      levels: ['info'],
+      transport: (event) => events.push(event)
+    })
+
     app.get('/health', () => 'ok')
 
-    const response: Response = await request(app).get('/health')
+    const response = await request(app).get('/health')
 
+    expect(returned).toBe(app)
     expect(response.status).toBe(200)
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(write.mock.calls[0]?.[0]).toContain('\u001B[')
-    expect(stripAnsi(write.mock.calls[0]?.[0] ?? '')).toMatch(
-      /^GET \/health 200 (?:[\d.]+ms|[\d.]+s) (?:\d+ B|[\d.]+ kB|[\d.]+ MB)\n$/
-    )
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      level: 'info',
+      method: 'GET',
+      path: '/health',
+      statusCode: 200
+    })
   })
 
-  test('supports skip and immediate options', async () => {
-    const write = jest.fn<(chunk: string) => boolean>().mockReturnValue(true)
+  test('filters structured logs by level', async () => {
+    const events: LoggerEvent[] = []
     const app = hyperin()
 
-    app.use(
-      logger({
-        stream: { write },
-        colors: false,
-        immediate: true,
-        skip: (request) => request.path === '/skip'
+    logger(app, {
+      levels: ['warn', 'error'],
+      transport: (event) => events.push(event)
+    })
+    app.get('/health', () => 'ok')
+
+    await request(app).get('/health')
+    await request(app).get('/missing')
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      level: 'warn',
+      method: 'GET',
+      path: '/missing',
+      statusCode: 404
+    })
+  })
+
+  test('writes structured logs to a local file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hyperin-logger-'))
+    const file = join(dir, 'access.log')
+    const app = hyperin()
+
+    try {
+      logger(app, { levels: ['info'], file })
+      app.get('/health', () => 'ok')
+
+      await request(app).get('/health').set('X-Request-Id', 'req-1')
+
+      const [line] = (await readFile(file, 'utf8')).trim().split('\n')
+      const event = JSON.parse(line) as LoggerEvent
+
+      expect(event).toMatchObject({
+        level: 'info',
+        method: 'GET',
+        path: '/health',
+        statusCode: 200,
+        requestId: 'req-1'
       })
-    )
-    app.get('/health', () => 'ok')
-    app.get('/skip', () => 'ok')
-
-    const health: Response = await request(app).get('/health')
-    const skip: Response = await request(app).get('/skip')
-
-    expect(health.status).toBe(200)
-    expect(skip.status).toBe(200)
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(write.mock.calls[0]?.[0]).toMatch(/^GET \/health /)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
-  test('supports named formats and custom tokens', async () => {
-    const write = jest.fn<(chunk: string) => boolean>().mockReturnValue(true)
+  test('exports structured events through generic exporters', async () => {
+    const exporter = jest.fn()
     const app = hyperin()
 
-    logger.token(
-      'request-id',
-      (request) => (request.get('x-request-id') as string) || 'missing'
-    )
-    logger.format('with-id', ':request-id :method :url :status')
-
-    app.use(logger({ stream: { write }, colors: false, format: 'with-id' }))
+    logger(app, {
+      levels: ['info'],
+      exporter: { export: exporter }
+    })
     app.get('/health', () => 'ok')
 
-    const response: Response = await request(app)
-      .get('/health')
-      .set('X-Request-Id', 'abc-123')
+    await request(app).get('/health').set('User-Agent', 'hyperin-test')
 
-    expect(response.status).toBe(200)
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(write.mock.calls[0]?.[0]).toBe('abc-123 GET /health 200\n')
+    expect(exporter).toHaveBeenCalledTimes(1)
+    expect(exporter.mock.calls[0]?.[0]).toMatchObject({
+      level: 'info',
+      message: 'GET /health 200',
+      method: 'GET',
+      path: '/health',
+      statusCode: 200,
+      userAgent: 'hyperin-test'
+    })
   })
 
-  test('supports tiny format string compatibility', async () => {
-    const write = jest.fn<(chunk: string) => boolean>().mockReturnValue(true)
+  test('emits application logs through the configured global logger', () => {
+    const events: LoggerEvent[] = []
     const app = hyperin()
 
-    app.use(logger({ stream: { write }, colors: false, format: 'tiny' }))
-    app.get('/health', () => 'ok')
+    logger(app, {
+      levels: ['info', 'success', 'error'],
+      transport: (event) => events.push(event)
+    })
 
-    const response: Response = await request(app).get('/health')
+    logger.info('user created', { userId: '123' })
+    logger.success('cache warmed')
+    logger.debug('debug hidden')
+    logger.error('payment failed', { orderId: 'ord-1' })
 
-    expect(response.status).toBe(200)
-    expect(write.mock.calls[0]?.[0]).toMatch(
-      /^GET \/health 200 (?:\d+|-) - [\d.]+ ms\n$/
-    )
-  })
-
-  test('prefers content-length for json responses', async () => {
-    const write = jest.fn<(chunk: string) => boolean>().mockReturnValue(true)
-    const app = hyperin()
-
-    app.use(logger({ stream: { write }, colors: false }))
-    app.get('/', () => ({ ok: true }))
-
-    const response: Response = await request(app).get('/')
-
-    expect(response.status).toBe(200)
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(write.mock.calls[0]?.[0]).toMatch(
-      /^GET \/ 200 (?:[\d.]+ms|[\d.]+s) 11 B\n$/
-    )
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: 'application',
+        level: 'info',
+        message: 'user created',
+        attributes: { userId: '123' }
+      }),
+      expect.objectContaining({
+        kind: 'application',
+        level: 'success',
+        message: 'cache warmed',
+        attributes: {}
+      }),
+      expect.objectContaining({
+        kind: 'application',
+        level: 'error',
+        message: 'payment failed',
+        attributes: { orderId: 'ord-1' }
+      })
+    ])
   })
 })
