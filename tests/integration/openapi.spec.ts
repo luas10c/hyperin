@@ -569,38 +569,40 @@ describe('OpenAPI integration', () => {
 
     expect(documentResponse.status).toBe(200)
     expect(operation.requestBody.content['application/json']).toBeUndefined()
-    expect(operation.requestBody.content['multipart/form-data'].schema).toEqual({
-      type: 'object',
-      properties: {
-        email: { type: 'string' },
-        password: { type: 'string' },
-        avatar: {
-          type: 'string',
-          description:
-            'User avatar image\n\nAccepted MIME types: image/png, image/jpeg.',
-          format: 'binary'
-        },
-        gallery: {
-          type: 'array',
-          description: 'Optional gallery images',
-          items: { type: 'string', format: 'binary' }
-        }
-      },
-      required: ['email', 'password', 'avatar']
-    })
-    expect(operation.requestBody.content['multipart/form-data'].encoding).toEqual(
+    expect(operation.requestBody.content['multipart/form-data'].schema).toEqual(
       {
-        email: {
-          contentType: 'text/plain'
+        type: 'object',
+        properties: {
+          email: { type: 'string' },
+          password: { type: 'string' },
+          avatar: {
+            type: 'string',
+            description:
+              'User avatar image\n\nAccepted MIME types: image/png, image/jpeg.',
+            format: 'binary'
+          },
+          gallery: {
+            type: 'array',
+            description: 'Optional gallery images',
+            items: { type: 'string', format: 'binary' }
+          }
         },
-        password: {
-          contentType: 'text/plain'
-        },
-        avatar: {
-          contentType: 'image/png, image/jpeg'
-        }
+        required: ['email', 'password', 'avatar']
       }
     )
+    expect(
+      operation.requestBody.content['multipart/form-data'].encoding
+    ).toEqual({
+      email: {
+        contentType: 'text/plain'
+      },
+      password: {
+        contentType: 'text/plain'
+      },
+      avatar: {
+        contentType: 'image/png, image/jpeg'
+      }
+    })
   })
 
   test('uses mapJsonSchema for vendors without native Standard JSON Schema', async () => {
@@ -909,12 +911,16 @@ describe('OpenAPI integration', () => {
     const operation = response.body.paths['/users'].post
 
     expect(response.status).toBe(200)
-    expect(response.body.components.schemas.PostUsersRequestBodyApplicationJson).toEqual({
+    expect(
+      response.body.components.schemas.PostUsersRequestBodyApplicationJson
+    ).toEqual({
       type: 'object',
       properties: { email: { type: 'string' } },
       required: ['email']
     })
-    expect(response.body.components.schemas.PostUsersResponse201ApplicationJson).toEqual({
+    expect(
+      response.body.components.schemas.PostUsersResponse201ApplicationJson
+    ).toEqual({
       type: 'object',
       properties: { id: { type: 'number' } },
       required: ['id']
@@ -922,7 +928,9 @@ describe('OpenAPI integration', () => {
     expect(operation.requestBody.content['application/json'].schema).toEqual({
       $ref: '#/components/schemas/PostUsersRequestBodyApplicationJson'
     })
-    expect(operation.responses['201'].content['application/json'].schema).toEqual({
+    expect(
+      operation.responses['201'].content['application/json'].schema
+    ).toEqual({
       $ref: '#/components/schemas/PostUsersResponse201ApplicationJson'
     })
   })
@@ -935,7 +943,10 @@ describe('OpenAPI integration', () => {
         200: {
           content: {
             'application/json': {
-              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+              schema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' } }
+              }
             }
           }
         }
@@ -972,7 +983,10 @@ describe('OpenAPI integration', () => {
         200: {
           content: {
             'application/json': {
-              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+              schema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' } }
+              }
             }
           }
         }
@@ -984,7 +998,10 @@ describe('OpenAPI integration', () => {
         201: {
           content: {
             'application/json': {
-              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+              schema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' } }
+              }
             }
           }
         }
@@ -1012,7 +1029,10 @@ describe('OpenAPI integration', () => {
         200: {
           content: {
             'application/json': {
-              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+              schema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' } }
+              }
             }
           }
         }
@@ -1183,7 +1203,10 @@ describe('OpenAPI integration', () => {
         200: {
           content: {
             'application/json': {
-              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+              schema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' } }
+              }
             }
           }
         }
@@ -1195,7 +1218,10 @@ describe('OpenAPI integration', () => {
         200: {
           content: {
             'application/json': {
-              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+              schema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' } }
+              }
             }
           }
         }
@@ -1250,7 +1276,10 @@ describe('OpenAPI integration', () => {
         200: {
           content: {
             'application/json': {
-              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+              schema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' } }
+              }
             }
           }
         }
@@ -1397,12 +1426,17 @@ describe('OpenAPI integration', () => {
       'Not found'
     )
     expect(response.body.components.parameters.UserId.in).toBe('path')
-    expect(response.body.components.examples.UserExample.value).toEqual({ id: '1' })
+    expect(response.body.components.examples.UserExample.value).toEqual({
+      id: '1'
+    })
     expect(
-      response.body.components.requestBodies.UserInput.content['application/json']
-        .schema.properties.email
+      response.body.components.requestBodies.UserInput.content[
+        'application/json'
+      ].schema.properties.email
     ).toEqual({ type: 'string' })
-    expect(response.body.components.headers.TraceId.description).toBe('Trace id')
+    expect(response.body.components.headers.TraceId.description).toBe(
+      'Trace id'
+    )
     expect(response.body.components.links.GetUserById.operationId).toBe(
       'getUsersById'
     )
@@ -1412,7 +1446,8 @@ describe('OpenAPI integration', () => {
       ].post.responses['200'].description
     ).toBe('Callback accepted')
     expect(
-      response.body.components.pathItems.UserPath.get.responses['200'].description
+      response.body.components.pathItems.UserPath.get.responses['200']
+        .description
     ).toBe('ok')
     expect(
       response.body.paths['/users/{id}'].get.callbacks.userUpdated[
@@ -1463,13 +1498,13 @@ describe('OpenAPI integration', () => {
           description: 'Created',
           content: {
             'application/json': {
-              schema: {
+              'schema': {
                 type: 'object',
                 properties: { id: { type: 'number' } },
                 required: ['id']
               },
-              example: { id: 1 },
-              examples: {
+              'example': { id: 1 },
+              'examples': {
                 created: {
                   summary: 'Created user',
                   value: { id: 1 }

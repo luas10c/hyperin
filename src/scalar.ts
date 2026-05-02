@@ -217,10 +217,12 @@ function serializeScriptValue(value: unknown): string {
     .replace(/&/g, '\\u0026')
 }
 
-function getDocumentInfo(
-  content: ScalarDocumentContent | undefined
-): { title?: string; description?: string } {
-  if (!content || typeof content !== 'object' || Array.isArray(content)) return {}
+function getDocumentInfo(content: ScalarDocumentContent | undefined): {
+  title?: string
+  description?: string
+} {
+  if (!content || typeof content !== 'object' || Array.isArray(content))
+    return {}
 
   const info = content.info
   if (!info || typeof info !== 'object' || Array.isArray(info)) return {}
@@ -236,7 +238,9 @@ function getDocumentInfo(
   }
 }
 
-function getSourceContent(source: ScalarSource): ScalarDocumentContent | undefined {
+function getSourceContent(
+  source: ScalarSource
+): ScalarDocumentContent | undefined {
   return source.content ?? source.spec?.content
 }
 
@@ -285,9 +289,13 @@ function createScalarDocument(options?: ScalarOptions): string {
   const openapiUrl = options?.url ?? '/openapi.json'
   const content = options?.content ?? baseConfiguration.content
   const contentInfo = getDocumentInfo(content)
-  const slug = options?.slug ?? baseConfiguration.slug ?? getOpenAPISlug(openapiUrl)
+  const slug =
+    options?.slug ?? baseConfiguration.slug ?? getOpenAPISlug(openapiUrl)
   const defaultTitle =
-    options?.title ?? baseConfiguration.title ?? contentInfo.title ?? 'API Reference'
+    options?.title ??
+    baseConfiguration.title ??
+    contentInfo.title ??
+    'API Reference'
   const defaultDescription = contentInfo.description ?? ''
   const sources = options?.sources ?? baseConfiguration.sources
   const normalizedSources = sources ? normalizeSources(sources) : undefined

@@ -29,6 +29,12 @@ export interface CompressOptions {
   encodings?: readonly CompressionEncoding[]
 
   /**
+   * Maximum bytes buffered while deciding whether a streamed response should be compressed.
+   * @default 65536
+   */
+  maxBufferSize?: number
+
+  /**
    * Custom predicate used to decide whether a response should be compressed.
    * Runs after the built-in status and header checks.
    */
@@ -195,6 +201,7 @@ function normalizeContentTypeHeader(
 
 export function compress(options: CompressOptions = {}): Middleware {
   const threshold = options.threshold ?? 1024
+  const maxBufferSize = options.maxBufferSize ?? 64 * 1024
   const supportedEncodings = options.encodings ?? DEFAULT_ENCODINGS
   const filter = options.filter ?? isCompressibleContentType
 
@@ -319,6 +326,13 @@ export function compress(options: CompressOptions = {}): Middleware {
 
       buffered.push(buffer)
       bufferedLength += buffer.length
+
+      if (bufferedLength > maxBufferSize) {
+        passthrough = true
+        flushBufferedPassthrough()
+        if (cb) cb()
+        return true
+      }
 
       if (shouldCompress(false)) {
         startCompression()

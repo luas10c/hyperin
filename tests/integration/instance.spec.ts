@@ -187,8 +187,10 @@ describe('Instance integration', () => {
 
   test('supports async trust proxy functions through app.set', async () => {
     const app = createInstance()
+    let calls = 0
 
     app.set('trust proxy', async ({ remoteAddress }) => {
+      calls++
       await new Promise((resolve) => setTimeout(resolve, 1))
       return remoteAddress === '127.0.0.1' || remoteAddress === '::1'
     })
@@ -200,6 +202,7 @@ describe('Instance integration', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ ip: '198.51.100.1' })
+    expect(calls).toBe(1)
   })
 
   test('shutdown closes the public server instance', async () => {
@@ -248,7 +251,7 @@ describe('Instance integration', () => {
     expect(response.status).toBe(500)
     expect(response.body as ErrorResponse).toEqual({
       statusCode: 500,
-      message: 'kaboom'
+      message: 'Internal Server Error'
     })
   })
 
@@ -268,7 +271,7 @@ describe('Instance integration', () => {
     expect(response.status).toBe(500)
     expect(response.body as ErrorResponse).toEqual({
       statusCode: 500,
-      message: 'kaboom'
+      message: 'Internal Server Error'
     })
   })
 
@@ -295,9 +298,9 @@ describe('Instance integration', () => {
     expect(response.status).toBe(500)
     expect(response.body as ErrorResponse).toEqual({
       statusCode: 500,
-      message: 'kaboom'
+      message: 'Internal Server Error'
     })
-    expect(messageReads).toBe(1)
+    expect(messageReads).toBe(0)
   })
 
   test('normal middleware can forward errors with next(error)', async () => {
@@ -314,7 +317,7 @@ describe('Instance integration', () => {
     expect(response.status).toBe(500)
     expect(response.body as ErrorResponse).toEqual({
       statusCode: 500,
-      message: 'blocked'
+      message: 'Internal Server Error'
     })
   })
 

@@ -73,12 +73,17 @@ export interface MatchResult {
 
 interface DynamicMatch {
   node: TrieNode
-  paramNames: string[]
-  paramValues: string[]
+  paramHead: DynamicParam | null
   paramCount: number
 }
 
 type DynamicTraversalState = DynamicMatch & { index: number }
+
+interface DynamicParam {
+  name: string
+  value: string
+  previous: DynamicParam | null
+}
 
 function forEachPathSegment(
   path: string,
@@ -288,8 +293,7 @@ export class RadixRouter {
         handlers: routeHandlers,
         middlewares: this.middlewares,
         params: this.#buildParams(
-          dynamicMatch.paramNames,
-          dynamicMatch.paramValues,
+          dynamicMatch.paramHead,
           dynamicMatch.paramCount
         ),
         matched: true
@@ -323,8 +327,7 @@ export class RadixRouter {
     let state: DynamicTraversalState = {
       node: this.root,
       index: 0,
-      paramNames: [],
-      paramValues: [],
+      paramHead: null,
       paramCount: 0
     }
 
@@ -352,18 +355,18 @@ export class RadixRouter {
 
       if (node.wildcardChild) {
         let wildcardEnd = path.length
-        while (
-          wildcardEnd > start &&
-          path.charCodeAt(wildcardEnd - 1) === 47
-        ) {
+        while (wildcardEnd > start && path.charCodeAt(wildcardEnd - 1) === 47) {
           wildcardEnd--
         }
 
         stack.push({
           node: node.wildcardChild,
           index: path.length,
-          paramNames: [...state.paramNames, '*'],
-          paramValues: [...state.paramValues, path.slice(start, wildcardEnd)],
+          paramHead: {
+            name: '*',
+            value: path.slice(start, wildcardEnd),
+            previous: state.paramHead
+          },
           paramCount: paramCount + 1
         })
       }
@@ -372,8 +375,11 @@ export class RadixRouter {
         stack.push({
           node: node.paramChild,
           index: nextIndex,
-          paramNames: [...state.paramNames, node.paramChild.paramName!],
-          paramValues: [...state.paramValues, segment],
+          paramHead: {
+            name: node.paramChild.paramName!,
+            value: segment,
+            previous: state.paramHead
+          },
           paramCount: paramCount + 1
         })
       }
@@ -383,8 +389,7 @@ export class RadixRouter {
         state = {
           node: exactChild,
           index: nextIndex,
-          paramNames: state.paramNames,
-          paramValues: state.paramValues,
+          paramHead: state.paramHead,
           paramCount
         }
         continue
@@ -397,16 +402,23 @@ export class RadixRouter {
   }
 
   #buildParams(
-    names: string[],
-    values: string[],
+    paramHead: DynamicParam | null,
     count: number
   ): Record<string, string> {
     if (count === 0) return {}
 
     const params: Record<string, string> = {}
+    const entries = new Array<DynamicParam>(count)
+    let entry = paramHead
+
+    for (let i = count - 1; i >= 0 && entry; i--) {
+      entries[i] = entry
+      entry = entry.previous
+    }
 
     for (let i = 0; i < count; i++) {
-      params[names[i]] = values[i]
+      const entry = entries[i]!
+      params[entry.name] = entry.value
     }
 
     return params

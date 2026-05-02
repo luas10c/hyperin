@@ -79,7 +79,7 @@ describe('cookies middleware', () => {
     expect(response.status).toBe(500)
     expect(response.body).toEqual({
       statusCode: 500,
-      message: 'SameSite=None requires Secure'
+      message: 'Internal Server Error'
     })
   })
 

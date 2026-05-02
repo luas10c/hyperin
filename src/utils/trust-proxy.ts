@@ -224,7 +224,8 @@ export async function shouldTrustForwardedHeaders(
 export async function resolveTrustedClientIp(
   remoteAddress: string | undefined,
   forwardedFor: string | string[] | undefined,
-  trustProxy: TrustProxySetting | undefined
+  trustProxy: TrustProxySetting | undefined,
+  trustedImmediatePeer?: boolean
 ): Promise<string> {
   const normalizedRemote = normalizeIp(remoteAddress)
   if (!normalizedRemote || trustProxy === undefined || trustProxy === false) {
@@ -233,6 +234,13 @@ export async function resolveTrustedClientIp(
 
   const forwardedChain = parseForwardedHeader(forwardedFor)
   if (forwardedChain.length === 0) return normalizedRemote
+
+  if (typeof trustProxy === 'function') {
+    const trusted =
+      trustedImmediatePeer ??
+      (await isTrustedHop(normalizedRemote, trustProxy, 0))
+    return trusted ? forwardedChain[0]! : normalizedRemote
+  }
 
   const chain = [...forwardedChain, normalizedRemote]
   for (let i = chain.length - 1; i >= 0; i--) {

@@ -79,7 +79,9 @@ describe('Scalar integration', () => {
     expect(response.text).toContain('"sources":[{"title":"Public API"')
     expect(response.text).toContain('"slug":"admin"')
     expect(response.text).toContain('"url":"/admin/openapi.json"')
-    expect(response.text).not.toContain('"url":"/openapi.json","slug":"openapi"')
+    expect(response.text).not.toContain(
+      '"url":"/openapi.json","slug":"openapi"'
+    )
     expect(response.text).not.toContain('fetch("/openapi.json")')
     expect(response.text).toContain('"theme":"purple"')
   })
@@ -171,9 +173,7 @@ describe('Scalar integration', () => {
 
     expect(response.status).toBe(200)
     expect(response.text).toContain('"authentication":{')
-    expect(response.text).toContain(
-      '"preferredSecurityScheme":"bearerAuth"'
-    )
+    expect(response.text).toContain('"preferredSecurityScheme":"bearerAuth"')
     expect(response.text).toContain('"token":"test-token"')
     expect(response.text).toContain('"value":"test-api-key"')
     expect(response.text).toContain('"createAnySecurityScheme":true')

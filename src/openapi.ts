@@ -248,8 +248,12 @@ export type OpenAPIDocumentResponses<TResponse = OpenAPIResponse> = Partial<
 > &
   Partial<Record<OpenAPIResponseStatusText | 'default', TResponse>>
 
-function normalizeResponseStatus(status: string): OpenAPIDocumentResponseStatus {
-  return status === 'any' ? 'default' : (status as OpenAPIDocumentResponseStatus)
+function normalizeResponseStatus(
+  status: string
+): OpenAPIDocumentResponseStatus {
+  return status === 'any'
+    ? 'default'
+    : (status as OpenAPIDocumentResponseStatus)
 }
 
 export interface OpenAPIParameter {
@@ -439,8 +443,10 @@ export type OpenAPIMediaTypeInput = Omit<
   encoding?: Record<string, OpenAPIEncoding>
 }
 
-export interface DescribeOperationRequestBody
-  extends Omit<OpenAPIRequestBody, 'content'> {
+export interface DescribeOperationRequestBody extends Omit<
+  OpenAPIRequestBody,
+  'content'
+> {
   content: OpenAPIContent<OpenAPIMediaTypeInput>
 }
 
@@ -451,7 +457,8 @@ export interface DescribeOperationResponse {
   content?: OpenAPIContent<OpenAPIMediaTypeInput>
   headers?: Record<
     string,
-    unknown | ({ schema: unknown; description?: string } & Partial<OpenAPIHeader>)
+    | unknown
+    | ({ schema: unknown; description?: string } & Partial<OpenAPIHeader>)
   >
   links?: Record<string, OpenAPILink>
   [key: string]: unknown
@@ -537,14 +544,14 @@ export interface OpenAPIOptions {
       termsOfService?: string
       contact?: OpenAPIContact
       license?: OpenAPILicense
-     }
-     servers?: OpenAPIServer[]
-     tags?: OpenAPITag[]
-     externalDocs?: OpenAPIExternalDocumentation
-     security?: OpenAPISecurityRequirement[]
-     webhooks?: Record<string, OpenAPIPathItem>
-     components?: OpenAPIComponents
-   }
+    }
+    servers?: OpenAPIServer[]
+    tags?: OpenAPITag[]
+    externalDocs?: OpenAPIExternalDocumentation
+    security?: OpenAPISecurityRequirement[]
+    webhooks?: Record<string, OpenAPIPathItem>
+    components?: OpenAPIComponents
+  }
 
   /**
    * Optional schema mappers keyed by constructor name.
@@ -1526,7 +1533,9 @@ function normalizeMediaType(
 
   return {
     ...rest,
-    ...(schema !== undefined ? { schema: schemaToOpenAPI(schema, direction, context) } : {})
+    ...(schema !== undefined
+      ? { schema: schemaToOpenAPI(schema, direction, context) }
+      : {})
   }
 }
 
@@ -1549,33 +1558,37 @@ function normalizeResponse(
   response: DescribeOperationResponse | OpenAPIResponse,
   context: OpenAPIConversionContext
 ): OpenAPIResponse {
-  const { schema, contentType, content, headers, ...rest } = response as
+  const { schema, contentType, ...rest } = response as
     | DescribeOperationResponse
     | (OpenAPIResponse & { schema?: unknown; contentType?: string })
   const normalizedContent = response.content
-    ? Object.fromEntries(
+    ? (Object.fromEntries(
         Object.entries(response.content).map(([contentType, entry]) => [
           contentType,
           normalizeMediaType(entry, 'output', context)
         ])
-      )
+      ) as Record<string, OpenAPIMediaType>)
     : undefined
 
   const normalizedHeaders = response.headers
-    ? Object.fromEntries(
+    ? (Object.fromEntries(
         Object.entries(response.headers).map(([name, header]) => [
           name,
           normalizeHeader(header, context)
         ])
-      )
+      ) as Record<string, OpenAPIHeader>)
     : undefined
+  const responseBase = rest as Omit<
+    OpenAPIResponse,
+    'description' | 'content' | 'headers'
+  >
 
   if (schema !== undefined) {
     const resolvedContentType = contentType ?? 'application/json'
     const description = response.description ?? 'Successful response'
 
     return {
-      ...rest,
+      ...responseBase,
       description,
       ...(normalizedHeaders ? { headers: normalizedHeaders } : {}),
       content: {
@@ -1588,7 +1601,7 @@ function normalizeResponse(
   }
 
   return {
-    ...rest,
+    ...responseBase,
     description: response.description ?? 'Successful response',
     ...(normalizedContent ? { content: normalizedContent } : {}),
     ...(normalizedHeaders ? { headers: normalizedHeaders } : {})
@@ -2237,7 +2250,9 @@ function createContentTypeSuffix(contentType: string): string {
   return toComponentName(contentType)
 }
 
-function shouldExtractSchema(schema: OpenAPISchema | undefined): schema is OpenAPISchema {
+function shouldExtractSchema(
+  schema: OpenAPISchema | undefined
+): schema is OpenAPISchema {
   return Boolean(schema && !schema.$ref)
 }
 
@@ -2286,22 +2301,25 @@ function extractOperationSchemasToComponents(
     normalized.requestBody = {
       ...operation.requestBody,
       content: Object.fromEntries(
-        Object.entries(operation.requestBody.content).map(([contentType, media]) => {
-          const mediaType = media as OpenAPIMediaType
-          if (!shouldExtractSchema(mediaType.schema)) return [contentType, mediaType]
+        Object.entries(operation.requestBody.content).map(
+          ([contentType, media]) => {
+            const mediaType = media as OpenAPIMediaType
+            if (!shouldExtractSchema(mediaType.schema))
+              return [contentType, mediaType]
 
-          return [
-            contentType,
-            {
-              ...mediaType,
-              schema: registerExtractedSchema(
-                schemas,
-                `${prefix}RequestBody${createContentTypeSuffix(contentType)}`,
-                mediaType.schema
-              )
-            }
-          ]
-        })
+            return [
+              contentType,
+              {
+                ...mediaType,
+                schema: registerExtractedSchema(
+                  schemas,
+                  `${prefix}RequestBody${createContentTypeSuffix(contentType)}`,
+                  mediaType.schema
+                )
+              }
+            ]
+          }
+        )
       )
     }
   }
@@ -2317,22 +2335,25 @@ function extractOperationSchemasToComponents(
           ...(response.content
             ? {
                 content: Object.fromEntries(
-                  Object.entries(response.content).map(([contentType, media]) => {
-                    const mediaType = media as OpenAPIMediaType
-                    if (!shouldExtractSchema(mediaType.schema)) return [contentType, mediaType]
+                  Object.entries(response.content).map(
+                    ([contentType, media]) => {
+                      const mediaType = media as OpenAPIMediaType
+                      if (!shouldExtractSchema(mediaType.schema))
+                        return [contentType, mediaType]
 
-                    return [
-                      contentType,
-                      {
-                        ...mediaType,
-                        schema: registerExtractedSchema(
-                          schemas,
-                          `${prefix}Response${toComponentName(status)}${createContentTypeSuffix(contentType)}`,
-                          mediaType.schema
-                        )
-                      }
-                    ]
-                  })
+                      return [
+                        contentType,
+                        {
+                          ...mediaType,
+                          schema: registerExtractedSchema(
+                            schemas,
+                            `${prefix}Response${toComponentName(status)}${createContentTypeSuffix(contentType)}`,
+                            mediaType.schema
+                          )
+                        }
+                      ]
+                    }
+                  )
                 )
               }
             : {})
@@ -2410,7 +2431,8 @@ function applyOperationId(
   path: string,
   operationIds: Set<string>
 ): OpenAPIOperation {
-  const baseOperationId = operation.operationId ?? createOperationId(method, path)
+  const baseOperationId =
+    operation.operationId ?? createOperationId(method, path)
   let operationId = baseOperationId
   let index = 2
 
@@ -2544,7 +2566,8 @@ export async function getOpenAPIDocument(
     : undefined
 
   const schemas =
-    state.options.components === true && Object.keys(extractedSchemas).length > 0
+    state.options.components === true &&
+    Object.keys(extractedSchemas).length > 0
       ? extractedSchemas
       : undefined
   const documentationComponents = state.options.documentation?.components

@@ -1014,7 +1014,8 @@ class Hyperin {
 
     const statusCode =
       (error as unknown as { statusCode?: number }).statusCode ?? 500
-    response.status(statusCode).json({ statusCode, message: error.message })
+    const message = statusCode >= 500 ? 'Internal Server Error' : error.message
+    response.status(statusCode).json({ statusCode, message })
   }
 
   #bindServer(server: Server): Server {
@@ -1050,8 +1051,7 @@ class Hyperin {
             response.end(
               JSON.stringify({
                 statusCode: 500,
-                message:
-                  err instanceof Error ? err.message : 'Internal Server Error'
+                message: 'Internal Server Error'
               })
             )
           }
@@ -1109,18 +1109,18 @@ class Hyperin {
 
     // Expose app-level proxy trust settings to the request instance
     request.locals.trustProxy = this.#trustProxyEnabled
+    const trustedForwardedHeaders = await shouldTrustForwardedHeaders(
+      request.socket?.remoteAddress,
+      this.#trustProxyEnabled
+    )
     request.locals.trustedClientIp = await resolveTrustedClientIp(
       request.socket?.remoteAddress,
       request.headers['x-forwarded-for'],
-      this.#trustProxyEnabled
+      this.#trustProxyEnabled,
+      trustedForwardedHeaders
     )
 
-    if (
-      await shouldTrustForwardedHeaders(
-        request.socket?.remoteAddress,
-        this.#trustProxyEnabled
-      )
-    ) {
+    if (trustedForwardedHeaders) {
       request.locals.trustedForwardedProtocol = parseForwardedHeader(
         request.headers['x-forwarded-proto']
       )[0]

@@ -149,6 +149,14 @@ export interface RateLimitOptions {
   skipFailedRequests?: boolean
 }
 
+export interface MemoryRateLimitStoreOptions {
+  /**
+   * Maximum number of keys retained by the in-memory store.
+   * @default 10000
+   */
+  maxKeys?: number
+}
+
 type FixedWindowEntry = {
   count: number
   resetAt: number
@@ -180,6 +188,11 @@ export class MemoryRateLimitStore implements RateLimitStore {
   #fixedWindowEntries = new Map<string, FixedWindowEntry>()
   #tokenBucketEntries = new Map<string, TokenBucketEntry>()
   #sweepCountdown = 0
+  readonly #maxKeys: number
+
+  constructor(options: MemoryRateLimitStoreOptions = {}) {
+    this.#maxKeys = Math.max(1, Math.floor(options.maxKeys ?? 10_000))
+  }
 
   consume(key: string, options: RateLimitStoreOptions): RateLimitResult {
     const now = Date.now()
@@ -230,7 +243,10 @@ export class MemoryRateLimitStore implements RateLimitStore {
     if (this.#sweepCountdown < 1024) return
 
     this.#sweepCountdown = 0
+    this.#sweepExpired(now, options)
+  }
 
+  #sweepExpired(now: number, options: RateLimitStoreOptions): void {
     for (const [key, entry] of this.#fixedWindowEntries) {
       if (entry.resetAt <= now) {
         this.#fixedWindowEntries.delete(key)
@@ -272,6 +288,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
     if (!existing || existing.resetAt <= now) {
       const resetAt = now + options.windowMs
       const entry: FixedWindowEntry = { count: 1, resetAt }
+      this.#evictIfNeeded(now, options)
       this.#fixedWindowEntries.set(key, entry)
 
       return {
@@ -309,6 +326,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
         tokens: Math.max(0, options.limit - 1),
         lastRefillAt: now
       }
+      this.#evictIfNeeded(now, options)
       this.#tokenBucketEntries.set(key, entry)
 
       return {
@@ -350,6 +368,32 @@ export class MemoryRateLimitStore implements RateLimitStore {
       resetTime: retryAfter,
       retryAfter
     }
+  }
+
+  #evictIfNeeded(now: number, options: RateLimitStoreOptions): void {
+    if (this.#size < this.#maxKeys) return
+
+    this.#sweepExpired(now, options)
+
+    while (this.#size >= this.#maxKeys) {
+      const fixedWindowKey = this.#fixedWindowEntries.keys().next().value as
+        | string
+        | undefined
+      if (fixedWindowKey !== undefined) {
+        this.#fixedWindowEntries.delete(fixedWindowKey)
+        continue
+      }
+
+      const tokenBucketKey = this.#tokenBucketEntries.keys().next().value as
+        | string
+        | undefined
+      if (tokenBucketKey === undefined) return
+      this.#tokenBucketEntries.delete(tokenBucketKey)
+    }
+  }
+
+  get #size(): number {
+    return this.#fixedWindowEntries.size + this.#tokenBucketEntries.size
   }
 }
 

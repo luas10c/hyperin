@@ -106,4 +106,30 @@ describe('compress middleware', () => {
     expect(response.headers['content-encoding']).toBe('gzip')
     expect(response.body.toString('utf8')).toBe(payload.repeat(4))
   })
+
+  test('passes through large non-compressible streams after buffer limit', async () => {
+    const app = hyperin()
+    const payload = Buffer.alloc(256, 1)
+
+    app.use(compress({ encodings: ['gzip'], threshold: 32, maxBufferSize: 128 }))
+    app.get('/binary-stream', ({ response }) => {
+      response.type('application/octet-stream')
+
+      for (let i = 0; i < 4; i++) {
+        response.write(payload)
+      }
+
+      response.end()
+    })
+
+    const response = await request(app)
+      .get('/binary-stream')
+      .set('Accept-Encoding', 'gzip')
+      .buffer(true)
+      .parse(bufferParser)
+
+    expect(response.status).toBe(200)
+    expect(response.headers['content-encoding']).toBeUndefined()
+    expect(response.body).toEqual(Buffer.concat([payload, payload, payload, payload]))
+  })
 })

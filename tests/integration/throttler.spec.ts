@@ -119,6 +119,30 @@ describe('throttler middleware', () => {
     )
   })
 
+  test('bounds memory store key cardinality', async () => {
+    const store = new MemoryRateLimitStore({ maxKeys: 1 })
+
+    const first = store.consume('first', {
+      algorithm: 'fixed-window',
+      limit: 1,
+      windowMs: 60_000
+    })
+    const second = store.consume('second', {
+      algorithm: 'fixed-window',
+      limit: 1,
+      windowMs: 60_000
+    })
+    const firstAgain = store.consume('first', {
+      algorithm: 'fixed-window',
+      limit: 1,
+      windowMs: 60_000
+    })
+
+    expect(first.allowed).toBe(true)
+    expect(second.allowed).toBe(true)
+    expect(firstAgain.allowed).toBe(true)
+  })
+
   test('supports skip predicate and disabling standard headers', async () => {
     const app = hyperin()
 
