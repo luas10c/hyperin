@@ -6,7 +6,16 @@ import request from 'supertest'
 
 import hyperin from '#/instance'
 import { json, multipart } from '#/middleware'
-import { model, openapi, clearOpenAPIRegistry } from '#/openapi'
+import {
+  apiKeyAuth,
+  basicAuth,
+  bearerAuth,
+  clearOpenAPIRegistry,
+  cookieAuth,
+  model,
+  oauth2Auth,
+  openapi
+} from '#/openapi'
 
 function stringSchema() {
   return {
@@ -239,9 +248,10 @@ describe('OpenAPI integration', () => {
     })
 
     const documentResponse = await request(app).get('/openapi.json')
-    const operation = documentResponse.body.paths['/users/:id'].post
+    const operation = documentResponse.body.paths['/users/{id}'].post
 
     expect(documentResponse.status).toBe(200)
+    expect(documentResponse.body.paths['/users/:id']).toBeUndefined()
     expect(operation.summary).toBe('Create user')
     expect(operation.parameters).toEqual(
       expect.arrayContaining([
@@ -816,5 +826,722 @@ describe('OpenAPI integration', () => {
       properties: { age: { type: 'number' } },
       required: ['age']
     })
+    expect(responseA.body.components).toBeUndefined()
+    expect(responseB.body.components).toBeUndefined()
+  })
+
+  test('emits reusable schemas and references named models when components are enabled', async () => {
+    const app = hyperin()
+
+    app.use(
+      model({
+        User: {
+          type: 'object',
+          properties: { email: { type: 'string' } },
+          required: ['email']
+        }
+      })
+    )
+
+    app.get('/users/:id', () => ({ ok: true }), {
+      params: objectSchema({ id: stringSchema() }, ['id']),
+      responses: {
+        200: {
+          description: 'ok',
+          schema: 'User'
+        }
+      }
+    })
+
+    openapi(app, { components: true })
+
+    const response = await request(app).get('/openapi.json')
+    const operation = response.body.paths['/users/{id}'].get
+
+    expect(response.status).toBe(200)
+    expect(response.body.paths['/users/:id']).toBeUndefined()
+    expect(response.body.components.schemas.User).toEqual({
+      type: 'object',
+      properties: { email: { type: 'string' } },
+      required: ['email']
+    })
+    expect(
+      operation.responses['200'].content['application/json'].schema
+    ).toEqual({
+      $ref: '#/components/schemas/User'
+    })
+    expect(operation.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'id', in: 'path', required: true })
+      ])
+    )
+  })
+
+  test('extracts inline operation schemas into components when components are enabled', async () => {
+    const app = hyperin()
+
+    app.post('/users', () => ({ ok: true }), {
+      body: objectSchema({ email: stringSchema() }, ['email']),
+      responses: {
+        201: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { id: { type: 'number' } },
+                required: ['id']
+              }
+            }
+          }
+        }
+      }
+    })
+
+    openapi(app, { components: true })
+
+    const response = await request(app).get('/openapi.json')
+    const operation = response.body.paths['/users'].post
+
+    expect(response.status).toBe(200)
+    expect(response.body.components.schemas.PostUsersRequestBodyApplicationJson).toEqual({
+      type: 'object',
+      properties: { email: { type: 'string' } },
+      required: ['email']
+    })
+    expect(response.body.components.schemas.PostUsersResponse201ApplicationJson).toEqual({
+      type: 'object',
+      properties: { id: { type: 'number' } },
+      required: ['id']
+    })
+    expect(operation.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/PostUsersRequestBodyApplicationJson'
+    })
+    expect(operation.responses['201'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/PostUsersResponse201ApplicationJson'
+    })
+  })
+
+  test('documents path parameters from route path when no params schema is provided', async () => {
+    const app = hyperin()
+
+    app.get('/users/:id/posts/:postId', () => ({ ok: true }), {
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+            }
+          }
+        }
+      }
+    })
+
+    openapi(app)
+
+    const response = await request(app).get('/openapi.json')
+    const operation = response.body.paths['/users/{id}/posts/{postId}'].get
+
+    expect(response.status).toBe(200)
+    expect(operation.parameters).toEqual([
+      {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' }
+      },
+      {
+        name: 'postId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' }
+      }
+    ])
+  })
+
+  test('generates stable operation ids when omitted', async () => {
+    const app = hyperin()
+
+    app.get('/users/:id/posts', () => ({ ok: true }), {
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+            }
+          }
+        }
+      }
+    })
+    app.post('/users/:id/posts', () => ({ ok: true }), {
+      operationId: 'createUserPost',
+      responses: {
+        201: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+            }
+          }
+        }
+      }
+    })
+
+    openapi(app)
+
+    const response = await request(app).get('/openapi.json')
+
+    expect(response.status).toBe(200)
+    expect(response.body.paths['/users/{id}/posts'].get.operationId).toBe(
+      'getUsersByIdPosts'
+    )
+    expect(response.body.paths['/users/{id}/posts'].post.operationId).toBe(
+      'createUserPost'
+    )
+  })
+
+  test('emits top-level webhooks with operation defaults', async () => {
+    const app = hyperin()
+
+    app.get('/users/:id', () => ({ ok: true }), {
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+            }
+          }
+        }
+      }
+    })
+
+    openapi(app, {
+      documentation: {
+        security: [{ bearerAuth: [] }],
+        webhooks: {
+          userCreated: {
+            post: {
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: { id: { type: 'string' } },
+                      required: ['id']
+                    }
+                  }
+                }
+              },
+              responses: {
+                200: {
+                  description: 'Webhook received'
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+
+    const response = await request(app).get('/openapi.json')
+
+    expect(response.status).toBe(200)
+    expect(response.body.webhooks.userCreated.post.operationId).toBe(
+      'postUserCreated'
+    )
+    expect(response.body.webhooks.userCreated.post.security).toEqual([
+      { bearerAuth: [] }
+    ])
+    expect(response.body.webhooks.userCreated.post.responses['200']).toEqual({
+      description: 'Webhook received'
+    })
+  })
+
+  test('emits top-level tags from documentation options', async () => {
+    const app = hyperin()
+
+    app.get('/users', () => ({ ok: true }), {
+      tags: ['Users']
+    })
+
+    openapi(app, {
+      documentation: {
+        tags: [
+          {
+            name: 'Users',
+            description: 'User management endpoints'
+          }
+        ]
+      }
+    })
+
+    const response = await request(app).get('/openapi.json')
+
+    expect(response.status).toBe(200)
+    expect(response.body.tags).toEqual([
+      {
+        name: 'Users',
+        description: 'User management endpoints'
+      }
+    ])
+  })
+
+  test('emits documented security schemes and operation security', async () => {
+    const app = hyperin()
+
+    app.get('/users', () => ({ ok: true }), {
+      security: [{ bearerAuth: [] }],
+      responses: {
+        200: {
+          description: 'ok'
+        }
+      }
+    })
+
+    openapi(app, {
+      documentation: {
+        security: [{ apiKeyAuth: [] }],
+        externalDocs: {
+          description: 'Authentication guide',
+          url: 'https://example.com/auth'
+        },
+        components: {
+          securitySchemes: {
+            bearerAuth: bearerAuth({ bearerFormat: 'JWT' }),
+            basicAuth: basicAuth(),
+            apiKeyAuth: apiKeyAuth(),
+            cookieAuth: cookieAuth('session'),
+            oauth2Auth: oauth2Auth({
+              authorizationCode: {
+                authorizationUrl: 'https://example.com/oauth/authorize',
+                tokenUrl: 'https://example.com/oauth/token',
+                scopes: {
+                  read: 'Read access'
+                }
+              }
+            })
+          }
+        }
+      }
+    })
+
+    const response = await request(app).get('/openapi.json')
+
+    expect(response.status).toBe(200)
+    expect(response.body.security).toEqual([{ apiKeyAuth: [] }])
+    expect(response.body.externalDocs).toEqual({
+      description: 'Authentication guide',
+      url: 'https://example.com/auth'
+    })
+    expect(response.body.components.securitySchemes).toEqual({
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT'
+      },
+      apiKeyAuth: {
+        type: 'apiKey',
+        name: 'x-api-key',
+        in: 'header'
+      },
+      basicAuth: {
+        type: 'http',
+        scheme: 'basic'
+      },
+      cookieAuth: {
+        type: 'apiKey',
+        name: 'session',
+        in: 'cookie'
+      },
+      oauth2Auth: {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/oauth/authorize',
+            tokenUrl: 'https://example.com/oauth/token',
+            scopes: {
+              read: 'Read access'
+            }
+          }
+        }
+      }
+    })
+    expect(response.body.paths['/users'].get.security).toEqual([
+      { bearerAuth: [] }
+    ])
+  })
+
+  test('shares global security with operations unless overridden', async () => {
+    const app = hyperin()
+
+    app.get('/private', () => ({ ok: true }), {
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+            }
+          }
+        }
+      }
+    })
+    app.get('/public', () => ({ ok: true }), {
+      security: [],
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+            }
+          }
+        }
+      }
+    })
+
+    openapi(app, {
+      documentation: {
+        components: {
+          securitySchemes: {
+            bearerAuth: {
+              type: 'http',
+              scheme: 'bearer'
+            }
+          }
+        },
+        security: [{ bearerAuth: [] }]
+      }
+    })
+
+    const response = await request(app).get('/openapi.json')
+
+    expect(response.status).toBe(200)
+    expect(response.body.security).toEqual([{ bearerAuth: [] }])
+    expect(response.body.paths['/private'].get.security).toEqual([
+      { bearerAuth: [] }
+    ])
+    expect(response.body.paths['/public'].get.security).toEqual([])
+  })
+
+  test('documents route headers and cookies as parameters', async () => {
+    const app = hyperin()
+
+    app.get('/profile', () => ({ ok: true }), {
+      headers: {
+        type: 'object',
+        properties: {
+          'x-request-id': { type: 'string' },
+          'accept-language': { type: 'string' }
+        },
+        required: ['x-request-id']
+      },
+      cookies: {
+        type: 'object',
+        properties: {
+          locale: { type: 'string' },
+          session: { type: 'string' }
+        },
+        required: ['session']
+      },
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { ok: { type: 'boolean' } } }
+            }
+          }
+        }
+      }
+    })
+
+    openapi(app)
+
+    const response = await request(app).get('/openapi.json')
+    const operation = response.body.paths['/profile'].get
+
+    expect(response.status).toBe(200)
+    expect(operation.parameters).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'x-request-id',
+          in: 'header',
+          required: true,
+          schema: { type: 'string' }
+        },
+        {
+          name: 'accept-language',
+          in: 'header',
+          required: false,
+          schema: { type: 'string' }
+        },
+        {
+          name: 'locale',
+          in: 'cookie',
+          required: false,
+          schema: { type: 'string' }
+        },
+        {
+          name: 'session',
+          in: 'cookie',
+          required: true,
+          schema: { type: 'string' }
+        }
+      ])
+    )
+  })
+
+  test('emits documented reusable components', async () => {
+    const app = hyperin()
+
+    app.get('/users/:id', () => ({ ok: true }), {
+      callbacks: {
+        userUpdated: {
+          '{$request.body#/callbackUrl}': {
+            post: {
+              responses: {
+                200: {
+                  description: 'Callback accepted'
+                }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: 'ok'
+        }
+      }
+    })
+
+    openapi(app, {
+      documentation: {
+        components: {
+          responses: {
+            NotFound: {
+              description: 'Not found'
+            }
+          },
+          parameters: {
+            UserId: {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' }
+            }
+          },
+          examples: {
+            UserExample: {
+              value: { id: '1' }
+            }
+          },
+          requestBodies: {
+            UserInput: {
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: { email: { type: 'string' } }
+                  }
+                }
+              }
+            }
+          },
+          headers: {
+            TraceId: {
+              schema: { type: 'string' },
+              description: 'Trace id'
+            }
+          },
+          links: {
+            GetUserById: {
+              operationId: 'getUsersById',
+              parameters: { id: '$response.body#/id' }
+            }
+          },
+          callbacks: {
+            UserUpdated: {
+              '{$request.body#/callbackUrl}': {
+                post: {
+                  responses: {
+                    200: {
+                      description: 'Callback accepted'
+                    }
+                  }
+                }
+              }
+            }
+          },
+          pathItems: {
+            UserPath: {
+              get: {
+                responses: {
+                  200: {
+                    description: 'ok'
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+
+    const response = await request(app).get('/openapi.json')
+
+    expect(response.status).toBe(200)
+    expect(response.body.components.responses.NotFound.description).toBe(
+      'Not found'
+    )
+    expect(response.body.components.parameters.UserId.in).toBe('path')
+    expect(response.body.components.examples.UserExample.value).toEqual({ id: '1' })
+    expect(
+      response.body.components.requestBodies.UserInput.content['application/json']
+        .schema.properties.email
+    ).toEqual({ type: 'string' })
+    expect(response.body.components.headers.TraceId.description).toBe('Trace id')
+    expect(response.body.components.links.GetUserById.operationId).toBe(
+      'getUsersById'
+    )
+    expect(
+      response.body.components.callbacks.UserUpdated[
+        '{$request.body#/callbackUrl}'
+      ].post.responses['200'].description
+    ).toBe('Callback accepted')
+    expect(
+      response.body.components.pathItems.UserPath.get.responses['200'].description
+    ).toBe('ok')
+    expect(
+      response.body.paths['/users/{id}'].get.callbacks.userUpdated[
+        '{$request.body#/callbackUrl}'
+      ].post.responses['200'].description
+    ).toBe('Callback accepted')
+  })
+
+  test('preserves media type examples and encoding metadata', async () => {
+    const app = hyperin()
+
+    app.post('/users', () => ({ ok: true }), {
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: { email: { type: 'string' } },
+              required: ['email']
+            },
+            example: { email: 'john@example.com' },
+            examples: {
+              default: {
+                summary: 'Default user',
+                value: { email: 'john@example.com' }
+              }
+            }
+          },
+          'multipart/form-data': {
+            schema: {
+              type: 'object',
+              properties: { avatar: { type: 'string', format: 'binary' } }
+            },
+            encoding: {
+              avatar: {
+                contentType: 'image/png',
+                style: 'form',
+                explode: true,
+                allowReserved: false
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        201: {
+          description: 'Created',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { id: { type: 'number' } },
+                required: ['id']
+              },
+              example: { id: 1 },
+              examples: {
+                created: {
+                  summary: 'Created user',
+                  value: { id: 1 }
+                }
+              },
+              'x-example-id': 'created-user'
+            }
+          },
+          links: {
+            GetUserById: {
+              operationId: 'getUser',
+              parameters: { id: '$response.body#/id' }
+            }
+          }
+        }
+      }
+    })
+
+    openapi(app)
+
+    const response = await request(app).get('/openapi.json')
+    const operation = response.body.paths['/users'].post
+
+    expect(response.status).toBe(200)
+    expect(operation.requestBody.content['application/json'].example).toEqual({
+      email: 'john@example.com'
+    })
+    expect(
+      operation.requestBody.content['application/json'].examples.default
+    ).toEqual({
+      summary: 'Default user',
+      value: { email: 'john@example.com' }
+    })
+    expect(
+      operation.requestBody.content['multipart/form-data'].encoding.avatar
+    ).toEqual({
+      contentType: 'image/png',
+      style: 'form',
+      explode: true,
+      allowReserved: false
+    })
+    expect(
+      operation.responses['201'].content['application/json'].example
+    ).toEqual({ id: 1 })
+    expect(
+      operation.responses['201'].content['application/json'].examples.created
+    ).toEqual({
+      summary: 'Created user',
+      value: { id: 1 }
+    })
+    expect(
+      operation.responses['201'].content['application/json']['x-example-id']
+    ).toBe('created-user')
+    expect(operation.responses['201'].links.GetUserById).toEqual({
+      operationId: 'getUser',
+      parameters: { id: '$response.body#/id' }
+    })
+  })
+
+  test('normalizes any response status alias to default', async () => {
+    const app = hyperin()
+
+    app.get('/users', () => ({ ok: true }), {
+      responses: {
+        any: {
+          description: 'Any response'
+        }
+      }
+    })
+
+    openapi(app)
+
+    const response = await request(app).get('/openapi.json')
+
+    expect(response.status).toBe(200)
+    expect(response.body.paths['/users'].get.responses.default).toEqual({
+      description: 'Any response'
+    })
+    expect(response.body.paths['/users'].get.responses.any).toBeUndefined()
   })
 })

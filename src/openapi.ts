@@ -24,33 +24,275 @@ export interface OpenAPISchema {
 export interface OpenAPIHeader {
   schema: OpenAPISchema
   description?: string
+  required?: boolean
+  deprecated?: boolean
+}
+
+export interface OpenAPIExample {
+  summary?: string
+  description?: string
+  value?: unknown
+  externalValue?: string
+  [key: string]: unknown
+}
+
+export interface OpenAPIEncoding {
+  contentType?: string
+  headers?: Record<string, OpenAPIHeader>
+  style?: string
+  explode?: boolean
+  allowReserved?: boolean
+  [key: string]: unknown
+}
+
+export interface OpenAPIMediaType {
+  schema?: OpenAPISchema
+  example?: unknown
+  examples?: Record<string, OpenAPIExample>
+  encoding?: Record<string, OpenAPIEncoding>
+  [key: string]: unknown
+}
+
+export type OpenAPIKnownContentType =
+  | 'application/json'
+  | 'application/problem+json'
+  | 'application/xml'
+  | 'application/x-www-form-urlencoded'
+  | 'application/octet-stream'
+  | 'application/pdf'
+  | 'application/text'
+  | 'multipart/form-data'
+  | 'text/plain'
+  | 'text/html'
+  | 'text/css'
+  | 'text/csv'
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/gif'
+  | 'image/webp'
+  | 'image/svg+xml'
+  | '*/*'
+
+export type OpenAPIContentType = OpenAPIKnownContentType | (string & {})
+
+export type OpenAPIContent<TMediaType = OpenAPIMediaType> = Partial<
+  Record<OpenAPIContentType, TMediaType>
+>
+
+export interface OpenAPILink {
+  operationRef?: string
+  operationId?: string
+  parameters?: Record<string, unknown>
+  requestBody?: unknown
+  description?: string
+  server?: OpenAPIServer
+  [key: string]: unknown
 }
 
 export interface OpenAPIResponse {
   description: string
-  content?: Record<string, { schema: OpenAPISchema }>
+  content?: OpenAPIContent
   headers?: Record<string, OpenAPIHeader>
+  links?: Record<string, OpenAPILink>
+  [key: string]: unknown
+}
+
+export type OpenAPIResponseStatusCode =
+  /** Continue */
+  | 100
+  /** Switching Protocols */
+  | 101
+  /** Processing */
+  | 102
+  /** Early Hints */
+  | 103
+  /** OK */
+  | 200
+  /** Created */
+  | 201
+  /** Accepted */
+  | 202
+  /** Non-Authoritative Information */
+  | 203
+  /** No Content */
+  | 204
+  /** Reset Content */
+  | 205
+  /** Partial Content */
+  | 206
+  /** Multi-Status */
+  | 207
+  /** Already Reported */
+  | 208
+  /** IM Used */
+  | 226
+  /** Multiple Choices */
+  | 300
+  /** Moved Permanently */
+  | 301
+  /** Found */
+  | 302
+  /** See Other */
+  | 303
+  /** Not Modified */
+  | 304
+  /** Use Proxy */
+  | 305
+  /** Temporary Redirect */
+  | 307
+  /** Permanent Redirect */
+  | 308
+  /** Bad Request */
+  | 400
+  /** Unauthorized */
+  | 401
+  /** Payment Required */
+  | 402
+  /** Forbidden */
+  | 403
+  /** Not Found */
+  | 404
+  /** Method Not Allowed */
+  | 405
+  /** Not Acceptable */
+  | 406
+  /** Proxy Authentication Required */
+  | 407
+  /** Request Timeout */
+  | 408
+  /** Conflict */
+  | 409
+  /** Gone */
+  | 410
+  /** Length Required */
+  | 411
+  /** Precondition Failed */
+  | 412
+  /** Content Too Large */
+  | 413
+  /** URI Too Long */
+  | 414
+  /** Unsupported Media Type */
+  | 415
+  /** Range Not Satisfiable */
+  | 416
+  /** Expectation Failed */
+  | 417
+  /** I'm a Teapot */
+  | 418
+  /** Misdirected Request */
+  | 421
+  /** Unprocessable Content */
+  | 422
+  /** Locked */
+  | 423
+  /** Failed Dependency */
+  | 424
+  /** Too Early */
+  | 425
+  /** Upgrade Required */
+  | 426
+  /** Precondition Required */
+  | 428
+  /** Too Many Requests */
+  | 429
+  /** Request Header Fields Too Large */
+  | 431
+  /** Unavailable For Legal Reasons */
+  | 451
+  /** Internal Server Error */
+  | 500
+  /** Not Implemented */
+  | 501
+  /** Bad Gateway */
+  | 502
+  /** Service Unavailable */
+  | 503
+  /** Gateway Timeout */
+  | 504
+  /** HTTP Version Not Supported */
+  | 505
+  /** Variant Also Negotiates */
+  | 506
+  /** Insufficient Storage */
+  | 507
+  /** Loop Detected */
+  | 508
+  /** Not Extended */
+  | 510
+  /** Network Authentication Required */
+  | 511
+
+export type OpenAPIResponseStatusText =
+  | `${OpenAPIResponseStatusCode}`
+  | '1XX'
+  | '2XX'
+  | '3XX'
+  | '4XX'
+  | '5XX'
+  | 'any'
+
+export type OpenAPIResponseStatus =
+  | OpenAPIResponseStatusCode
+  | OpenAPIResponseStatusText
+
+export type OpenAPIDocumentResponseStatus = OpenAPIResponseStatus | 'default'
+
+export type OpenAPIResponses<TResponse = OpenAPIResponse> = Partial<
+  Record<OpenAPIResponseStatusCode, TResponse>
+> &
+  Partial<Record<OpenAPIResponseStatusText, TResponse>>
+
+export type OpenAPIDocumentResponses<TResponse = OpenAPIResponse> = Partial<
+  Record<OpenAPIResponseStatusCode, TResponse>
+> &
+  Partial<Record<OpenAPIResponseStatusText | 'default', TResponse>>
+
+function normalizeResponseStatus(status: string): OpenAPIDocumentResponseStatus {
+  return status === 'any' ? 'default' : (status as OpenAPIDocumentResponseStatus)
 }
 
 export interface OpenAPIParameter {
   name: string
   in: 'query' | 'path' | 'header' | 'cookie'
   required?: boolean
-  schema: OpenAPISchema
+  schema?: OpenAPISchema
   description?: string
+  deprecated?: boolean
+  allowEmptyValue?: boolean
+  style?: string
+  explode?: boolean
+  allowReserved?: boolean
+  example?: unknown
+  examples?: Record<string, OpenAPIExample>
+  content?: OpenAPIContent
+  [key: string]: unknown
 }
 
 export interface OpenAPIRequestBody {
   required?: boolean
   description?: string
-  content: Record<
-    string,
-    {
-      schema: OpenAPISchema
-      encoding?: Record<string, { contentType: string }>
-    }
-  >
+  content: OpenAPIContent
+  [key: string]: unknown
 }
+
+export interface OpenAPIPathItem {
+  summary?: string
+  description?: string
+  get?: OpenAPIOperation
+  put?: OpenAPIOperation
+  post?: OpenAPIOperation
+  delete?: OpenAPIOperation
+  options?: OpenAPIOperation
+  head?: OpenAPIOperation
+  patch?: OpenAPIOperation
+  trace?: OpenAPIOperation
+  servers?: OpenAPIServer[]
+  parameters?: OpenAPIParameter[]
+  [key: string]: unknown
+}
+
+export type OpenAPICallback = Record<string, OpenAPIPathItem>
 
 export interface OpenAPIOperation {
   summary?: string
@@ -59,25 +301,173 @@ export interface OpenAPIOperation {
   tags?: string[]
   parameters?: OpenAPIParameter[]
   requestBody?: OpenAPIRequestBody
-  responses?: Record<string, OpenAPIResponse>
+  responses?: OpenAPIDocumentResponses
+  security?: OpenAPISecurityRequirement[]
+  servers?: OpenAPIServer[]
+  externalDocs?: OpenAPIExternalDocumentation
+  callbacks?: Record<string, OpenAPICallback>
   deprecated?: boolean
+  [key: string]: unknown
+}
+
+export interface OpenAPIServer {
+  url: string
+  description?: string
+  variables?: Record<
+    string,
+    { default: string; enum?: string[]; description?: string }
+  >
+}
+
+export interface OpenAPIContact {
+  name?: string
+  url?: string
+  email?: string
+}
+
+export interface OpenAPILicense {
+  name: string
+  identifier?: string
+  url?: string
+}
+
+export interface OpenAPIExternalDocumentation {
+  description?: string
+  url: string
+}
+
+export interface OpenAPITag {
+  name: string
+  description?: string
+  externalDocs?: OpenAPIExternalDocumentation
+}
+
+export type OpenAPISecurityRequirement = Record<string, string[]>
+
+export interface OpenAPIApiKeySecurityScheme<
+  TLocation extends 'query' | 'header' | 'cookie' =
+    | 'query'
+    | 'header'
+    | 'cookie'
+> {
+  type: 'apiKey'
+  name: string
+  in: TLocation
+  description?: string
+  [key: string]: unknown
+}
+
+export interface OpenAPIHttpSecurityScheme<TScheme extends string = string> {
+  type: 'http'
+  scheme: TScheme
+  bearerFormat?: string
+  description?: string
+  [key: string]: unknown
+}
+
+export interface OpenAPIMutualTLSSecurityScheme {
+  type: 'mutualTLS'
+  description?: string
+  [key: string]: unknown
+}
+
+export interface OpenAPIOAuth2Flow {
+  authorizationUrl?: string
+  tokenUrl?: string
+  refreshUrl?: string
+  scopes: Record<string, string>
+  [key: string]: unknown
+}
+
+export interface OpenAPIOAuth2Flows {
+  implicit?: OpenAPIOAuth2Flow
+  password?: OpenAPIOAuth2Flow
+  clientCredentials?: OpenAPIOAuth2Flow
+  authorizationCode?: OpenAPIOAuth2Flow
+  [key: string]: unknown
+}
+
+export interface OpenAPIOAuth2SecurityScheme {
+  type: 'oauth2'
+  flows: OpenAPIOAuth2Flows
+  description?: string
+  [key: string]: unknown
+}
+
+export interface OpenAPIOpenIdConnectSecurityScheme {
+  type: 'openIdConnect'
+  openIdConnectUrl: string
+  description?: string
+  [key: string]: unknown
+}
+
+export type OpenAPISecurityScheme =
+  | OpenAPIApiKeySecurityScheme
+  | OpenAPIHttpSecurityScheme
+  | OpenAPIMutualTLSSecurityScheme
+  | OpenAPIOAuth2SecurityScheme
+  | OpenAPIOpenIdConnectSecurityScheme
+
+export interface OpenAPISecuritySchemes {
+  [name: string]: OpenAPISecurityScheme | undefined
+  bearerAuth?: OpenAPIHttpSecurityScheme<'bearer'>
+  basicAuth?: OpenAPIHttpSecurityScheme<'basic'>
+  apiKeyAuth?: OpenAPIApiKeySecurityScheme<'query' | 'header'>
+  cookieAuth?: OpenAPIApiKeySecurityScheme<'cookie'>
+  oauth2Auth?: OpenAPIOAuth2SecurityScheme
+}
+
+export interface OpenAPIComponents {
+  schemas?: Record<string, OpenAPISchema>
+  responses?: Record<string, OpenAPIResponse>
+  parameters?: Record<string, OpenAPIParameter>
+  examples?: Record<string, OpenAPIExample>
+  requestBodies?: Record<string, OpenAPIRequestBody>
+  headers?: Record<string, OpenAPIHeader>
+  securitySchemes?: OpenAPISecuritySchemes
+  links?: Record<string, OpenAPILink>
+  callbacks?: Record<string, OpenAPICallback>
+  pathItems?: Record<string, OpenAPIPathItem>
+  [key: string]: unknown
+}
+
+export type OpenAPIMediaTypeInput = Omit<
+  OpenAPIMediaType,
+  'schema' | 'encoding'
+> & {
+  schema: unknown
+  encoding?: Record<string, OpenAPIEncoding>
+}
+
+export interface DescribeOperationRequestBody
+  extends Omit<OpenAPIRequestBody, 'content'> {
+  content: OpenAPIContent<OpenAPIMediaTypeInput>
 }
 
 export interface DescribeOperationResponse {
-  description: string
+  description?: string
   schema?: unknown
   contentType?: string
-  content?: Record<string, { schema: unknown }>
-  headers?: Record<string, unknown | { schema: unknown; description?: string }>
+  content?: OpenAPIContent<OpenAPIMediaTypeInput>
+  headers?: Record<
+    string,
+    unknown | ({ schema: unknown; description?: string } & Partial<OpenAPIHeader>)
+  >
+  links?: Record<string, OpenAPILink>
+  [key: string]: unknown
 }
 
 export interface DescribeOperationInput extends Omit<
   OpenAPIOperation,
-  'responses'
+  'responses' | 'requestBody'
 > {
-  detail?: Omit<OpenAPIOperation, 'responses'> & { hide?: boolean }
-  response?: Record<string, DescribeOperationResponse>
-  responses?: Record<string, DescribeOperationResponse>
+  detail?: Omit<OpenAPIOperation, 'responses' | 'requestBody'> & {
+    hide?: boolean
+    requestBody?: DescribeOperationRequestBody
+  }
+  requestBody?: DescribeOperationRequestBody
+  response?: OpenAPIResponses<DescribeOperationResponse>
+  responses?: OpenAPIResponses<DescribeOperationResponse>
 }
 
 export interface WithHeaderOptions {
@@ -99,12 +489,17 @@ export interface OpenAPIDocument {
     title: string
     version: string
     description?: string
+    termsOfService?: string
+    contact?: OpenAPIContact
+    license?: OpenAPILicense
   }
-  servers?: Array<{ url: string; description?: string }>
-  paths: Record<string, Record<string, OpenAPIOperation>>
-  components?: {
-    schemas?: Record<string, OpenAPISchema>
-  }
+  servers?: OpenAPIServer[]
+  tags?: OpenAPITag[]
+  externalDocs?: OpenAPIExternalDocumentation
+  security?: OpenAPISecurityRequirement[]
+  paths: Record<string, OpenAPIPathItem>
+  webhooks?: Record<string, OpenAPIPathItem>
+  components?: OpenAPIComponents
 }
 
 export interface OpenAPIOptions {
@@ -124,6 +519,14 @@ export interface OpenAPIOptions {
   file?: string
 
   /**
+   * Emits reusable OpenAPI components and uses `$ref` for named models.
+   * Disabled by default to preserve the existing inline schema output.
+   *
+   * @default false
+   */
+  components?: boolean
+
+  /**
    * Base document metadata merged into the generated OpenAPI document.
    */
   documentation?: {
@@ -131,9 +534,17 @@ export interface OpenAPIOptions {
       title?: string
       version?: string
       description?: string
-    }
-    servers?: Array<{ url: string; description?: string }>
-  }
+      termsOfService?: string
+      contact?: OpenAPIContact
+      license?: OpenAPILicense
+     }
+     servers?: OpenAPIServer[]
+     tags?: OpenAPITag[]
+     externalDocs?: OpenAPIExternalDocumentation
+     security?: OpenAPISecurityRequirement[]
+     webhooks?: Record<string, OpenAPIPathItem>
+     components?: OpenAPIComponents
+   }
 
   /**
    * Optional schema mappers keyed by constructor name.
@@ -142,7 +553,7 @@ export interface OpenAPIOptions {
   mapJsonSchema?: Record<string, (schema: unknown) => Record<string, unknown>>
 }
 
-type RequestSource = 'body' | 'params' | 'query'
+type RequestSource = 'body' | 'params' | 'query' | 'headers' | 'cookies'
 type OperationFragment = Partial<OpenAPIOperation>
 type OpenAPIConversionContext = {
   options?: OpenAPIOptions
@@ -220,6 +631,16 @@ const multipartFieldsKey = Symbol.for('hyperin.multipart.fields')
 function normalizePath(path: string | undefined, fallback: string): string {
   if (!path || path === '') return fallback
   return path.startsWith('/') ? path : `/${path}`
+}
+
+function toOpenAPIPath(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => {
+      if (!segment.startsWith(':') || segment.length === 1) return segment
+      return `{${segment.slice(1)}}`
+    })
+    .join('/')
 }
 
 function isSchemaLikeValue(value: unknown): value is Record<string, unknown> {
@@ -901,9 +1322,11 @@ export function schemaToOpenAPI(
   context: OpenAPIConversionContext = {}
 ): OpenAPISchema {
   if (typeof schema === 'string') {
-    return context.modelRegistry?.has(schema)
-      ? cloneSchema(context.modelRegistry.get(schema) as OpenAPISchema)
-      : { type: 'string' }
+    if (!context.modelRegistry?.has(schema)) return { type: 'string' }
+
+    return context.options?.components === true
+      ? { $ref: `#/components/schemas/${schema}` }
+      : cloneSchema(context.modelRegistry.get(schema) as OpenAPISchema)
   }
 
   if (!schema || (typeof schema !== 'object' && typeof schema !== 'function')) {
@@ -997,15 +1420,23 @@ function jsonSchemaToOpenAPI(schema: Record<string, unknown>): OpenAPISchema {
 }
 
 function buildParameters(
-  source: Extract<RequestSource, 'params' | 'query'>,
+  source: Exclude<RequestSource, 'body'>,
   schema: OpenAPISchema
 ): OpenAPIParameter[] {
   const properties = schema.properties ?? {}
   const requiredSet = new Set(schema.required ?? [])
+  const parameterLocation =
+    source === 'params'
+      ? 'path'
+      : source === 'headers'
+        ? 'header'
+        : source === 'cookies'
+          ? 'cookie'
+          : 'query'
 
   return Object.entries(properties).map(([name, propertySchema]) => ({
     name,
-    in: source === 'params' ? 'path' : 'query',
+    in: parameterLocation,
     required: source === 'params' ? true : requiredSet.has(name),
     schema: propertySchema
   }))
@@ -1036,6 +1467,18 @@ export async function createOpenAPIOperationFragment(
   }
 }
 
+export function describeRequestParameters(
+  source: Exclude<RequestSource, 'body'>,
+  schema: unknown
+): Handler {
+  return setHandlerMetadata(
+    async ({ next }) => next(),
+    fragmentMetadataKey,
+    (context?: OpenAPIConversionContext) =>
+      createOpenAPIOperationFragment(source, schema, context ?? {})
+  )
+}
+
 function mergeUniqueParameters(
   base: OpenAPIParameter[] = [],
   extra: OpenAPIParameter[] = []
@@ -1058,15 +1501,14 @@ function normalizeHeader(
   context: OpenAPIConversionContext
 ): OpenAPIHeader {
   if (input && typeof input === 'object' && 'schema' in input) {
+    const { schema, ...rest } = input as { schema: unknown } & Record<
+      string,
+      unknown
+    >
+
     return {
-      schema: schemaToOpenAPI(
-        (input as { schema: unknown }).schema,
-        'output',
-        context
-      ),
-      ...(typeof (input as { description?: unknown }).description === 'string'
-        ? { description: (input as { description?: string }).description }
-        : {})
+      ...rest,
+      schema: schemaToOpenAPI(schema, 'output', context)
     }
   }
 
@@ -1075,15 +1517,46 @@ function normalizeHeader(
   }
 }
 
+function normalizeMediaType(
+  entry: OpenAPIMediaTypeInput | OpenAPIMediaType,
+  direction: SchemaDirection,
+  context: OpenAPIConversionContext
+): OpenAPIMediaType {
+  const { schema, ...rest } = entry as OpenAPIMediaTypeInput
+
+  return {
+    ...rest,
+    ...(schema !== undefined ? { schema: schemaToOpenAPI(schema, direction, context) } : {})
+  }
+}
+
+function normalizeRequestBody(
+  requestBody: DescribeOperationRequestBody | OpenAPIRequestBody,
+  context: OpenAPIConversionContext
+): OpenAPIRequestBody {
+  return {
+    ...requestBody,
+    content: Object.fromEntries(
+      Object.entries(requestBody.content).map(([contentType, entry]) => [
+        contentType,
+        normalizeMediaType(entry, 'input', context)
+      ])
+    )
+  }
+}
+
 function normalizeResponse(
   response: DescribeOperationResponse | OpenAPIResponse,
   context: OpenAPIConversionContext
 ): OpenAPIResponse {
+  const { schema, contentType, content, headers, ...rest } = response as
+    | DescribeOperationResponse
+    | (OpenAPIResponse & { schema?: unknown; contentType?: string })
   const normalizedContent = response.content
     ? Object.fromEntries(
         Object.entries(response.content).map(([contentType, entry]) => [
           contentType,
-          { schema: schemaToOpenAPI(entry.schema, 'output', context) }
+          normalizeMediaType(entry, 'output', context)
         ])
       )
     : undefined
@@ -1097,23 +1570,26 @@ function normalizeResponse(
       )
     : undefined
 
-  if ('schema' in response && response.schema !== undefined) {
-    const contentType = response.contentType ?? 'application/json'
+  if (schema !== undefined) {
+    const resolvedContentType = contentType ?? 'application/json'
+    const description = response.description ?? 'Successful response'
 
     return {
-      description: response.description,
+      ...rest,
+      description,
       ...(normalizedHeaders ? { headers: normalizedHeaders } : {}),
       content: {
         ...(normalizedContent ?? {}),
-        [contentType]: {
-          schema: schemaToOpenAPI(response.schema, 'output', context)
+        [resolvedContentType]: {
+          schema: schemaToOpenAPI(schema, 'output', context)
         }
       }
     }
   }
 
   return {
-    description: response.description,
+    ...rest,
+    description: response.description ?? 'Successful response',
     ...(normalizedContent ? { content: normalizedContent } : {}),
     ...(normalizedHeaders ? { headers: normalizedHeaders } : {})
   }
@@ -1136,16 +1612,30 @@ function normalizeOperation(
 
   delete base.detail
   delete base.response
+  const detailRequestBody = (
+    detail as
+      | { requestBody?: DescribeOperationRequestBody | OpenAPIRequestBody }
+      | undefined
+  )?.requestBody
+  const requestBody =
+    (base.requestBody as
+      | DescribeOperationRequestBody
+      | OpenAPIRequestBody
+      | undefined) ?? detailRequestBody
+  delete base.requestBody
 
   return {
     ...(detail ?? {}),
     ...(base as OpenAPIOperation),
+    ...(requestBody
+      ? { requestBody: normalizeRequestBody(requestBody, context) }
+      : {}),
     ...(operation.responses || response
       ? {
           responses: Object.fromEntries(
             Object.entries(operation.responses ?? response ?? {}).map(
               ([status, responseItem]) => [
-                status,
+                normalizeResponseStatus(status),
                 normalizeResponse(responseItem, context)
               ]
             )
@@ -1160,11 +1650,13 @@ function mergeResponses(
   extra: OpenAPIOperation['responses'] = {}
 ): OpenAPIOperation['responses'] {
   const merged: NonNullable<OpenAPIOperation['responses']> = { ...current }
+  const mergedByStatus = merged as Record<string, OpenAPIResponse | undefined>
 
-  for (const [status, response] of Object.entries(extra)) {
-    const existing = merged[status]
+  for (const [rawStatus, response] of Object.entries(extra)) {
+    const status = normalizeResponseStatus(rawStatus)
+    const existing = mergedByStatus[status]
 
-    merged[status] = existing
+    mergedByStatus[status] = existing
       ? {
           description: response.description || existing.description,
           ...(existing.content || response.content
@@ -1410,7 +1902,7 @@ function applyMultipartRequestBody(
           ...requestBody.content,
           'multipart/form-data': {
             schema: mergeMultipartSchemaFields(
-              multipartContent.schema,
+              multipartContent.schema ?? {},
               fieldsSchema
             ),
             ...(multipartContent.encoding || encoding
@@ -1441,7 +1933,7 @@ function applyMultipartRequestBody(
       content: {
         ...content,
         'multipart/form-data': {
-          schema: mergeMultipartSchemaFields(jsonContent.schema, fieldsSchema),
+          schema: mergeMultipartSchemaFields(jsonContent.schema ?? {}, fieldsSchema),
           ...(encoding ? { encoding } : {})
         }
       }
@@ -1495,6 +1987,65 @@ export function withHeader(
   }
 }
 
+export function bearerAuth(
+  options: Omit<OpenAPIHttpSecurityScheme<'bearer'>, 'type' | 'scheme'> = {}
+): OpenAPIHttpSecurityScheme<'bearer'> {
+  return {
+    type: 'http',
+    scheme: 'bearer',
+    ...options
+  }
+}
+
+export function basicAuth(
+  options: Omit<OpenAPIHttpSecurityScheme<'basic'>, 'type' | 'scheme'> = {}
+): OpenAPIHttpSecurityScheme<'basic'> {
+  return {
+    type: 'http',
+    scheme: 'basic',
+    ...options
+  }
+}
+
+export function apiKeyAuth(
+  options: Partial<
+    Omit<OpenAPIApiKeySecurityScheme<'query' | 'header'>, 'type'>
+  > = {}
+): OpenAPIApiKeySecurityScheme<'query' | 'header'> {
+  return {
+    type: 'apiKey',
+    name: 'x-api-key',
+    in: 'header',
+    ...options
+  }
+}
+
+export function cookieAuth(
+  name = 'session',
+  options: Omit<
+    OpenAPIApiKeySecurityScheme<'cookie'>,
+    'type' | 'name' | 'in'
+  > = {}
+): OpenAPIApiKeySecurityScheme<'cookie'> {
+  return {
+    type: 'apiKey',
+    name,
+    in: 'cookie',
+    ...options
+  }
+}
+
+export function oauth2Auth(
+  flows: OpenAPIOAuth2Flows,
+  options: Omit<OpenAPIOAuth2SecurityScheme, 'type' | 'flows'> = {}
+): OpenAPIOAuth2SecurityScheme {
+  return {
+    type: 'oauth2',
+    flows,
+    ...options
+  }
+}
+
 function routeKey(method: string, path: string): string {
   return `${method.toUpperCase()} ${path}`
 }
@@ -1518,6 +2069,10 @@ function recordOperation(
 
 function cloneSchema(schema: OpenAPISchema): OpenAPISchema {
   return JSON.parse(JSON.stringify(schema)) as OpenAPISchema
+}
+
+function cloneComponents(components: OpenAPIComponents): OpenAPIComponents {
+  return JSON.parse(JSON.stringify(components)) as OpenAPIComponents
 }
 
 async function extractHandlerOperation(
@@ -1565,6 +2120,10 @@ function recordRouteFromHandlers(
   path: string,
   handlers: Handler[]
 ): void {
+  for (const handler of handlers) {
+    registerModelsFromHandler(state, handler)
+  }
+
   const key = routeKey(method, path)
   const current = state.routeRegistry.get(key)
 
@@ -1602,6 +2161,267 @@ async function resolveRouteOperation(
   return operation
 }
 
+function toComponentName(value: string): string {
+  const words = value.match(/[a-zA-Z0-9]+/g) ?? []
+  const name = words
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join('')
+
+  return name || 'Schema'
+}
+
+function createOperationComponentPrefix(method: string, path: string): string {
+  const normalizedPath = path.replace(/\{([^}]+)\}/g, 'By $1')
+  return toComponentName(`${method} ${normalizedPath}`)
+}
+
+function createContentTypeSuffix(contentType: string): string {
+  return toComponentName(contentType)
+}
+
+function shouldExtractSchema(schema: OpenAPISchema | undefined): schema is OpenAPISchema {
+  return Boolean(schema && !schema.$ref)
+}
+
+function registerExtractedSchema(
+  schemas: Record<string, OpenAPISchema>,
+  name: string,
+  schema: OpenAPISchema
+): OpenAPISchema {
+  let candidate = name
+  let index = 2
+
+  while (schemas[candidate] !== undefined) {
+    candidate = `${name}${index}`
+    index++
+  }
+
+  schemas[candidate] = cloneSchema(schema)
+  return { $ref: `#/components/schemas/${candidate}` }
+}
+
+function extractOperationSchemasToComponents(
+  operation: OpenAPIOperation,
+  method: string,
+  path: string,
+  schemas: Record<string, OpenAPISchema>
+): OpenAPIOperation {
+  const prefix = createOperationComponentPrefix(method, path)
+  const normalized: OpenAPIOperation = { ...operation }
+
+  if (operation.parameters) {
+    normalized.parameters = operation.parameters.map((parameter) => {
+      if (!shouldExtractSchema(parameter.schema)) return parameter
+
+      return {
+        ...parameter,
+        schema: registerExtractedSchema(
+          schemas,
+          `${prefix}${toComponentName(parameter.name)}Parameter`,
+          parameter.schema
+        )
+      }
+    })
+  }
+
+  if (operation.requestBody) {
+    normalized.requestBody = {
+      ...operation.requestBody,
+      content: Object.fromEntries(
+        Object.entries(operation.requestBody.content).map(([contentType, media]) => {
+          const mediaType = media as OpenAPIMediaType
+          if (!shouldExtractSchema(mediaType.schema)) return [contentType, mediaType]
+
+          return [
+            contentType,
+            {
+              ...mediaType,
+              schema: registerExtractedSchema(
+                schemas,
+                `${prefix}RequestBody${createContentTypeSuffix(contentType)}`,
+                mediaType.schema
+              )
+            }
+          ]
+        })
+      )
+    }
+  }
+
+  if (operation.responses) {
+    const responses = operation.responses as Record<string, OpenAPIResponse>
+
+    normalized.responses = Object.fromEntries(
+      Object.entries(responses).map(([status, response]) => [
+        status,
+        {
+          ...response,
+          ...(response.content
+            ? {
+                content: Object.fromEntries(
+                  Object.entries(response.content).map(([contentType, media]) => {
+                    const mediaType = media as OpenAPIMediaType
+                    if (!shouldExtractSchema(mediaType.schema)) return [contentType, mediaType]
+
+                    return [
+                      contentType,
+                      {
+                        ...mediaType,
+                        schema: registerExtractedSchema(
+                          schemas,
+                          `${prefix}Response${toComponentName(status)}${createContentTypeSuffix(contentType)}`,
+                          mediaType.schema
+                        )
+                      }
+                    ]
+                  })
+                )
+              }
+            : {})
+        }
+      ])
+    ) as OpenAPIDocumentResponses
+  }
+
+  return normalized
+}
+
+function applyGlobalSecurity(
+  operation: OpenAPIOperation,
+  security: OpenAPISecurityRequirement[] | undefined
+): OpenAPIOperation {
+  if (!security || operation.security !== undefined) return operation
+
+  return {
+    ...operation,
+    security
+  }
+}
+
+function getOpenAPIPathParameters(path: string): string[] {
+  return [...path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1])
+}
+
+function applyPathParameters(
+  operation: OpenAPIOperation,
+  path: string
+): OpenAPIOperation {
+  const parameterNames = getOpenAPIPathParameters(path)
+  if (parameterNames.length === 0) return operation
+
+  const existingParameters = operation.parameters ?? []
+  const existingPathParameters = new Set(
+    existingParameters
+      .filter((parameter) => parameter.in === 'path')
+      .map((parameter) => parameter.name)
+  )
+  const missingParameters: OpenAPIParameter[] = parameterNames
+    .filter((name) => !existingPathParameters.has(name))
+    .map((name) => ({
+      name,
+      in: 'path',
+      required: true,
+      schema: { type: 'string' }
+    }))
+
+  if (missingParameters.length === 0) return operation
+
+  return {
+    ...operation,
+    parameters: [...existingParameters, ...missingParameters]
+  }
+}
+
+function toOperationIdPart(value: string): string {
+  return toComponentName(value)
+}
+
+function createOperationId(method: string, path: string): string {
+  const normalizedPath = path.replace(/\{([^}]+)\}/g, ' by $1 ')
+  const suffix = toOperationIdPart(normalizedPath)
+  const methodPrefix = method.toLowerCase()
+
+  return suffix
+    ? `${methodPrefix}${suffix.charAt(0).toUpperCase()}${suffix.slice(1)}`
+    : `${methodPrefix}Root`
+}
+
+function applyOperationId(
+  operation: OpenAPIOperation,
+  method: string,
+  path: string,
+  operationIds: Set<string>
+): OpenAPIOperation {
+  const baseOperationId = operation.operationId ?? createOperationId(method, path)
+  let operationId = baseOperationId
+  let index = 2
+
+  while (operationIds.has(operationId)) {
+    operationId = `${baseOperationId}${index}`
+    index++
+  }
+
+  operationIds.add(operationId)
+
+  return operation.operationId === operationId
+    ? operation
+    : {
+        ...operation,
+        operationId
+      }
+}
+
+function applyOperationDefaults(
+  operation: OpenAPIOperation,
+  method: string,
+  path: string,
+  options: OpenAPIOptions,
+  operationIds: Set<string>
+): OpenAPIOperation {
+  return applyOperationId(
+    applyGlobalSecurity(
+      applyPathParameters(operation, path),
+      options.documentation?.security
+    ),
+    method,
+    path,
+    operationIds
+  )
+}
+
+function normalizePathItemOperations(
+  pathItem: OpenAPIPathItem,
+  path: string,
+  options: OpenAPIOptions,
+  operationIds: Set<string>
+): OpenAPIPathItem {
+  const normalized: OpenAPIPathItem = { ...pathItem }
+
+  for (const method of [
+    'get',
+    'put',
+    'post',
+    'delete',
+    'options',
+    'head',
+    'patch',
+    'trace'
+  ] as const) {
+    const operation = pathItem[method]
+    if (!operation) continue
+
+    normalized[method] = applyOperationDefaults(
+      operation,
+      method,
+      path,
+      options,
+      operationIds
+    )
+  }
+
+  return normalized
+}
+
 export async function getOpenAPIDocument(
   state: OpenAPIRegistryState = {
     options: {},
@@ -1611,14 +2431,81 @@ export async function getOpenAPIDocument(
   }
 ): Promise<OpenAPIDocument> {
   const paths: OpenAPIDocument['paths'] = {}
+  const operationIds = new Set<string>()
+  const extractedSchemas: Record<string, OpenAPISchema> =
+    state.options.components === true
+      ? Object.fromEntries(
+          [...state.modelRegistry.entries()].map(([name, schema]) => [
+            name,
+            cloneSchema(schema)
+          ])
+        )
+      : {}
 
   for (const route of state.routeRegistry.values()) {
-    const operation = await resolveRouteOperation(route, state.context)
+    const resolvedOperation = await resolveRouteOperation(route, state.context)
+    const openapiPath = toOpenAPIPath(route.path)
+    const method = route.method.toLowerCase()
+    const operation = resolvedOperation
+      ? applyOperationDefaults(
+          resolvedOperation,
+          method,
+          openapiPath,
+          state.options,
+          operationIds
+        )
+      : undefined
     if (!operation) continue
 
-    const pathItem = (paths[route.path] ??= {})
-    pathItem[route.method.toLowerCase()] = operation
+    const pathItem = (paths[openapiPath] ??= {})
+    pathItem[method] =
+      state.options.components === true
+        ? extractOperationSchemasToComponents(
+            operation,
+            method,
+            openapiPath,
+            extractedSchemas
+          )
+        : operation
   }
+
+  const webhooks = state.options.documentation?.webhooks
+    ? Object.fromEntries(
+        Object.entries(state.options.documentation.webhooks).map(
+          ([name, pathItem]) => [
+            name,
+            normalizePathItemOperations(
+              pathItem,
+              name,
+              state.options,
+              operationIds
+            )
+          ]
+        )
+      )
+    : undefined
+
+  const schemas =
+    state.options.components === true && Object.keys(extractedSchemas).length > 0
+      ? extractedSchemas
+      : undefined
+  const documentationComponents = state.options.documentation?.components
+    ? cloneComponents(state.options.documentation.components)
+    : undefined
+  const components =
+    documentationComponents || schemas
+      ? {
+          ...(documentationComponents ?? {}),
+          ...(documentationComponents?.schemas || schemas
+            ? {
+                schemas: {
+                  ...(documentationComponents?.schemas ?? {}),
+                  ...(schemas ?? {})
+                }
+              }
+            : {})
+        }
+      : undefined
 
   return {
     $schema: 'https://spec.openapis.org/oas/3.1/schema-base/2025-09-15',
@@ -1628,12 +2515,32 @@ export async function getOpenAPIDocument(
       version: state.options.documentation?.info?.version ?? '1.0.0',
       ...(state.options.documentation?.info?.description
         ? { description: state.options.documentation.info.description }
+        : {}),
+      ...(state.options.documentation?.info?.termsOfService
+        ? { termsOfService: state.options.documentation.info.termsOfService }
+        : {}),
+      ...(state.options.documentation?.info?.contact
+        ? { contact: state.options.documentation.info.contact }
+        : {}),
+      ...(state.options.documentation?.info?.license
+        ? { license: state.options.documentation.info.license }
         : {})
     },
     ...(state.options.documentation?.servers
       ? { servers: state.options.documentation.servers }
       : {}),
-    paths
+    ...(state.options.documentation?.tags
+      ? { tags: state.options.documentation.tags }
+      : {}),
+    ...(state.options.documentation?.externalDocs
+      ? { externalDocs: state.options.documentation.externalDocs }
+      : {}),
+    ...(state.options.documentation?.security
+      ? { security: state.options.documentation.security }
+      : {}),
+    paths,
+    ...(webhooks ? { webhooks } : {}),
+    ...(components ? { components } : {})
   }
 }
 

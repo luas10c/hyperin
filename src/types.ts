@@ -7,6 +7,16 @@ import type {
   RequestParams,
   RequestQuery
 } from './request'
+import type {
+  OpenAPICallback,
+  OpenAPIExternalDocumentation,
+  OpenAPIParameter,
+  DescribeOperationRequestBody,
+  OpenAPIResponses,
+  DescribeOperationResponse,
+  OpenAPISecurityRequirement,
+  OpenAPIServer
+} from './openapi'
 import type { Response } from './response'
 
 export type NextFunction = (error?: Error) => void | Promise<void>
@@ -137,6 +147,16 @@ export interface RouteSchemaOptions {
   query?: unknown
 
   /**
+   * Documentation schema for request headers.
+   */
+  headers?: unknown
+
+  /**
+   * Documentation schema for request cookies.
+   */
+  cookies?: unknown
+
+  /**
    * Short operation summary used in the generated OpenAPI document.
    */
   summary?: string
@@ -162,9 +182,39 @@ export interface RouteSchemaOptions {
   deprecated?: boolean
 
   /**
+   * Explicit OpenAPI parameters merged into the generated operation.
+   */
+  parameters?: OpenAPIParameter[]
+
+  /**
+   * Explicit OpenAPI request body merged into the generated operation.
+   */
+  requestBody?: DescribeOperationRequestBody
+
+  /**
+   * OpenAPI security requirements for the operation.
+   */
+  security?: OpenAPISecurityRequirement[]
+
+  /**
+   * OpenAPI servers for the operation.
+   */
+  servers?: OpenAPIServer[]
+
+  /**
+   * External documentation attached to the OpenAPI operation.
+   */
+  externalDocs?: OpenAPIExternalDocumentation
+
+  /**
+   * OpenAPI callbacks attached to the operation.
+   */
+  callbacks?: Record<string, OpenAPICallback>
+
+  /**
    * Additional response schemas merged into the generated OpenAPI operation.
    */
-  responses?: Record<string | number, unknown>
+  responses?: OpenAPIResponses<DescribeOperationResponse>
 }
 
 export interface TypedMiddleware<

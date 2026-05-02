@@ -11,7 +11,11 @@ import { Request } from './request'
 import { Response } from './response'
 import { errorMiddleware, RadixRouter } from './router'
 import { validate } from './validation'
-import { describeOperation, type DescribeOperationInput } from './openapi'
+import {
+  describeOperation,
+  describeRequestParameters,
+  type DescribeOperationInput
+} from './openapi'
 import {
   parseForwardedHeader,
   resolveTrustedClientIp,
@@ -642,6 +646,12 @@ function buildRouteOptionHandlers(options: RouteSchemaOptions): Handler[] {
     handlers.push(validate.params(options.params))
   if (options.query !== undefined) handlers.push(validate.query(options.query))
   if (options.body !== undefined) handlers.push(validate.body(options.body))
+  if (options.headers !== undefined) {
+    handlers.push(describeRequestParameters('headers', options.headers))
+  }
+  if (options.cookies !== undefined) {
+    handlers.push(describeRequestParameters('cookies', options.cookies))
+  }
 
   const operation: DescribeOperationInput = {
     ...(typeof options.summary === 'string'
@@ -657,6 +667,14 @@ function buildRouteOptionHandlers(options: RouteSchemaOptions): Handler[] {
     ...(typeof options.deprecated === 'boolean'
       ? { deprecated: options.deprecated }
       : {}),
+    ...(Array.isArray(options.parameters)
+      ? { parameters: options.parameters }
+      : {}),
+    ...(options.requestBody ? { requestBody: options.requestBody } : {}),
+    ...(Array.isArray(options.security) ? { security: options.security } : {}),
+    ...(Array.isArray(options.servers) ? { servers: options.servers } : {}),
+    ...(options.externalDocs ? { externalDocs: options.externalDocs } : {}),
+    ...(options.callbacks ? { callbacks: options.callbacks } : {}),
     ...(options.responses
       ? { responses: options.responses as DescribeOperationInput['responses'] }
       : {})

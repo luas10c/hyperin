@@ -67,6 +67,57 @@ export type ScalarSearchHotKey =
 
 export type ScalarOrderSchemaPropertiesBy = 'alpha' | 'preserve'
 
+export type ScalarDocumentContent = string | null | Record<string, unknown>
+
+export type ScalarPreferredSecurityScheme =
+  | string
+  | (string | string[])[]
+  | null
+
+export interface ScalarAuthenticationSecurityScheme {
+  value?: string
+  token?: string
+  username?: string
+  password?: string
+  flows?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface ScalarAuthenticationConfiguration {
+  /**
+   * Preferred OpenAPI security scheme name or AND/OR security scheme groups.
+   */
+  preferredSecurityScheme?: ScalarPreferredSecurityScheme
+
+  /**
+   * Values and overrides keyed by `components.securitySchemes` name.
+   */
+  securitySchemes?: Record<string, ScalarAuthenticationSecurityScheme>
+
+  /**
+   * Allows Scalar to show generic auth options not declared in the document.
+   */
+  createAnySecurityScheme?: boolean
+}
+
+export interface ScalarSource {
+  default?: boolean
+  url?: string
+  content?: ScalarDocumentContent
+  title?: string
+  slug?: string
+  spec?: {
+    url?: string
+    content?: ScalarDocumentContent
+  }
+  agent?: {
+    key?: string
+    disabled?: boolean
+    hideAddApi?: boolean
+  }
+  [key: string]: unknown
+}
+
 export interface ScalarConfiguration {
   /**
    * Additional Scalar UI configuration passed directly to the client.
@@ -84,6 +135,10 @@ export interface ScalarConfiguration {
   showDeveloperTools?: ScalarDeveloperToolsVisibility
   proxyUrl?: string
   baseServerURL?: string
+  authentication?: ScalarAuthenticationConfiguration
+  title?: string
+  slug?: string
+  content?: ScalarDocumentContent
   searchHotKey?: ScalarSearchHotKey
   defaultOpenFirstTag?: boolean
   defaultOpenAllTags?: boolean
@@ -91,6 +146,7 @@ export interface ScalarConfiguration {
   expandAllResponses?: boolean
   orderSchemaPropertiesBy?: ScalarOrderSchemaPropertiesBy
   orderRequiredPropertiesFirst?: boolean
+  sources?: ScalarSource[]
   [key: string]: unknown
 }
 
@@ -106,6 +162,32 @@ export interface ScalarOptions {
    * @default '/openapi.json'
    */
   url?: string
+
+  /**
+   * OpenAPI document content passed inline to Scalar.
+   */
+  content?: ScalarDocumentContent
+
+  /**
+   * Scalar document title shortcut.
+   */
+  title?: string
+
+  /**
+   * Scalar document slug shortcut.
+   */
+  slug?: string
+
+  /**
+   * OpenAPI document sources consumed by Scalar. When provided, `url` is not
+   * injected into the generated Scalar configuration.
+   */
+  sources?: ScalarSource[]
+
+  /**
+   * Authentication configuration passed to Scalar.
+   */
+  authentication?: ScalarAuthenticationConfiguration
 
   /**
    * Shortcut for `configuration.darkMode`.
@@ -135,15 +217,96 @@ function serializeScriptValue(value: unknown): string {
     .replace(/&/g, '\\u0026')
 }
 
+function getDocumentInfo(
+  content: ScalarDocumentContent | undefined
+): { title?: string; description?: string } {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return {}
+
+  const info = content.info
+  if (!info || typeof info !== 'object' || Array.isArray(info)) return {}
+  const metadata = info as Record<string, unknown>
+
+  return {
+    ...(typeof metadata.title === 'string' && metadata.title !== ''
+      ? { title: metadata.title }
+      : {}),
+    ...(typeof metadata.description === 'string' && metadata.description !== ''
+      ? { description: metadata.description }
+      : {})
+  }
+}
+
+function getSourceContent(source: ScalarSource): ScalarDocumentContent | undefined {
+  return source.content ?? source.spec?.content
+}
+
+function createSlug(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  return slug || 'openapi'
+}
+
+function getSourceSlug(source: ScalarSource, index: number): string {
+  if (source.slug) return source.slug
+  if (source.url) return getOpenAPISlug(source.url)
+  if (source.spec?.url) return getOpenAPISlug(source.spec.url)
+  if (source.title) return createSlug(source.title)
+
+  const info = getDocumentInfo(getSourceContent(source))
+  if (info.title) return createSlug(info.title)
+
+  return `source-${index + 1}`
+}
+
+function normalizeSources(sources: ScalarSource[]): ScalarSource[] {
+  const hasDefault = sources.some((source) => source.default === true)
+
+  return sources.map((source, index) => {
+    const normalized = { ...source }
+    const info = getDocumentInfo(getSourceContent(source))
+
+    normalized.slug ??= getSourceSlug(source, index)
+    normalized.title ??= info.title ?? normalized.slug
+
+    if (!hasDefault && index === 0) {
+      normalized.default = true
+    }
+
+    return normalized
+  })
+}
+
 function createScalarDocument(options?: ScalarOptions): string {
+  const baseConfiguration = options?.configuration ?? {}
   const openapiUrl = options?.url ?? '/openapi.json'
-  const slug = getOpenAPISlug(openapiUrl)
-  const defaultTitle = 'API Reference'
-  const defaultDescription = ''
+  const content = options?.content ?? baseConfiguration.content
+  const contentInfo = getDocumentInfo(content)
+  const slug = options?.slug ?? baseConfiguration.slug ?? getOpenAPISlug(openapiUrl)
+  const defaultTitle =
+    options?.title ?? baseConfiguration.title ?? contentInfo.title ?? 'API Reference'
+  const defaultDescription = contentInfo.description ?? ''
+  const sources = options?.sources ?? baseConfiguration.sources
+  const normalizedSources = sources ? normalizeSources(sources) : undefined
+  const shouldFetchDocumentMetadata = !content && !normalizedSources
+  const documentMetadataExpression = shouldFetchDocumentMetadata
+    ? `fetch(${serializeScriptValue(openapiUrl)})
+        .then((response) => response.ok ? response.json() : null)`
+    : `Promise.resolve(${serializeScriptValue(content ?? null)})`
   const configuration = serializeScriptValue({
-    ...(options?.configuration ?? {}),
-    url: openapiUrl,
-    slug,
+    ...baseConfiguration,
+    ...(normalizedSources
+      ? { sources: normalizedSources }
+      : content !== undefined
+        ? { content, slug }
+        : { url: openapiUrl, slug }),
+    ...(options?.title ? { title: options.title } : {}),
+    ...(options?.authentication
+      ? { authentication: options.authentication }
+      : {}),
     ...(typeof options?.darkMode === 'boolean'
       ? { darkMode: options.darkMode }
       : {}),
@@ -165,8 +328,7 @@ function createScalarDocument(options?: ScalarOptions): string {
 
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.52.4" integrity="sha384-tPvZsWUisjPSa5t4cFmEhJq3K4mfQ7uXu1jPs+Nkke/8etOBqVXEdg4uOlb0RzSU" crossorigin="anonymous"></script>
     <script>
-      fetch(${serializeScriptValue(openapiUrl)})
-        .then((response) => response.ok ? response.json() : null)
+      ${documentMetadataExpression}
         .then((documentSpec) => {
           const descriptionElement = document.querySelector('meta[name="description"]')
           const title =
