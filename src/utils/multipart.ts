@@ -162,6 +162,7 @@ export async function parseMultipart(
   const fields = Object.create(null) as Record<string, string>
   const files = Object.create(null) as Record<string, unknown>
   const totalSizeLimit = limits.totalSize ?? 10 * 1024 * 1024
+  const maxHeaderSize = limits.maxHeaderSize ?? 16 * 1024
   const fieldFileCounts = new Map<string, number>()
   const fieldFileSizes = new Map<string, number>()
 
@@ -528,7 +529,17 @@ export async function parseMultipart(
 
         if (phase === 'headers') {
           const separatorIndex = buffer.indexOf(doubleCrlf)
-          if (separatorIndex === -1) break
+          if (separatorIndex === -1) {
+            if (buffer.length > maxHeaderSize) {
+              fail('Multipart part headers too large', 413)
+            }
+
+            break
+          }
+
+          if (separatorIndex > maxHeaderSize) {
+            fail('Multipart part headers too large', 413)
+          }
 
           const headerSection = buffer
             .subarray(0, separatorIndex)

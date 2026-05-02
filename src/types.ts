@@ -364,4 +364,10 @@ export type MultipartLimits = {
    * Maximum total multipart payload size in bytes.
    */
   totalSize?: number
+  /**
+   * Maximum size in bytes for the header block of each multipart part.
+   *
+   * This applies before the terminating `\r\n\r\n` separator is found.
+   */
+  maxHeaderSize?: number
 }

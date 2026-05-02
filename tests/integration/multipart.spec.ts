@@ -730,6 +730,31 @@ describe('multipart middleware', () => {
     })
   })
 
+  test('rejects multipart parts whose headers exceed maxHeaderSize', async () => {
+    const app = hyperin()
+    app.use(multipart({ limits: { maxHeaderSize: 32 } }))
+    app.post(
+      '/upload',
+      ({ request }) => request.body as Record<string, unknown>
+    )
+
+    const response = await sendRawMultipart(app, {
+      boundary: 'header-limit-boundary',
+      body:
+        '--header-limit-boundary\r\n' +
+        'Content-Disposition: form-data; name="abcdefghijklmnopqrstuvwxyz"\r\n\r\n' +
+        '1\r\n' +
+        '--header-limit-boundary--\r\n'
+    })
+
+    expect(response.status).toBe(413)
+    expect(JSON.parse(response.body)).toEqual({
+      statusCode: 413,
+      error: 'Multipart part headers too large',
+      method: 'POST'
+    })
+  })
+
   test('rejects array file fields with too many uploaded files', async () => {
     const app = hyperin()
 
