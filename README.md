@@ -98,6 +98,38 @@ Supported Standard Schema libraries include:
 - [Joi](https://joi.dev)
 - and more
 
+## Logger
+
+Use the built-in logger to emit structured events with custom levels, metadata, and async transports.
+
+```ts
+
+import { hyperin } from 'hyperin'
+import { createLogger } from 'hyperin/logger'
+
+const app = hyperin()
+
+const logger = createLogger({
+  kind: 'audit',
+  level: 'info',
+  transports: [
+    async function ({ event }) {
+      console.log(event)
+    }
+  ]
+})
+
+app.get('/', async function () {
+  logger.trace('Get all the data.', { })
+
+  return {
+    message: 'Hello, World!'
+  }
+})
+
+app.listen(7000, '0.0.0.0')
+```
+
 ## OpenAPI
 
 Generate an OpenAPI document from route schemas.
