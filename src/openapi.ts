@@ -1809,7 +1809,7 @@ function getMultipartRequiredFields(
 
 function createMultipartEncoding(
   fields: Record<string, unknown> | null
-): Record<string, { contentType: string }> | undefined {
+): Record<string, OpenAPIEncoding> | undefined {
   if (!fields) return undefined
 
   const encoding = Object.fromEntries(
@@ -1829,6 +1829,56 @@ function createMultipartEncoding(
       ]
     })
   )
+
+  return Object.keys(encoding).length > 0 ? encoding : undefined
+}
+
+function isMultipartFileSchema(schema: OpenAPISchema | undefined): boolean {
+  if (!schema) return false
+  if (schema.type === 'string' && schema.format === 'binary') return true
+  return isMultipartFileSchema(schema.items)
+}
+
+function getMultipartTextFieldContentType(schema: OpenAPISchema): string {
+  return schema.type === 'object' || schema.type === 'array'
+    ? 'application/json'
+    : 'text/plain'
+}
+
+function createMultipartTextEncoding(
+  schema: OpenAPISchema,
+  fieldsSchema: OpenAPISchema | null
+): Record<string, OpenAPIEncoding> | undefined {
+  if (!schema.properties) return undefined
+
+  const fileFieldNames = new Set(Object.keys(fieldsSchema?.properties ?? {}))
+  const encoding = Object.fromEntries(
+    Object.entries(schema.properties).flatMap(([name, propertySchema]) => {
+      if (fileFieldNames.has(name) || isMultipartFileSchema(propertySchema)) {
+        return []
+      }
+
+      return [
+        [
+          name,
+          {
+            contentType: getMultipartTextFieldContentType(propertySchema)
+          }
+        ]
+      ]
+    })
+  )
+
+  return Object.keys(encoding).length > 0 ? encoding : undefined
+}
+
+function mergeMultipartEncoding(
+  ...entries: Array<Record<string, OpenAPIEncoding> | undefined>
+): Record<string, OpenAPIEncoding> | undefined {
+  const encoding = Object.assign({}, ...entries.filter(Boolean)) as Record<
+    string,
+    OpenAPIEncoding
+  >
 
   return Object.keys(encoding).length > 0 ? encoding : undefined
 }
@@ -1874,7 +1924,7 @@ function applyMultipartRequestBody(
   fields: Record<string, unknown> | null
 ): OpenAPIOperation {
   const fieldsSchema = createMultipartFieldsSchema(fields)
-  const encoding = createMultipartEncoding(fields)
+  const fileEncoding = createMultipartEncoding(fields)
   const requestBody = operation.requestBody
   const jsonContent = requestBody?.content['application/json']
   const multipartContent = requestBody?.content['multipart/form-data']
@@ -1886,7 +1936,7 @@ function applyMultipartRequestBody(
         content: {
           'multipart/form-data': {
             schema: fieldsSchema,
-            ...(encoding ? { encoding } : {})
+            ...(fileEncoding ? { encoding: fileEncoding } : {})
           }
         }
       }
@@ -1894,6 +1944,16 @@ function applyMultipartRequestBody(
   }
 
   if (requestBody && multipartContent) {
+    const multipartSchema = mergeMultipartSchemaFields(
+      multipartContent.schema ?? {},
+      fieldsSchema
+    )
+    const encoding = mergeMultipartEncoding(
+      createMultipartTextEncoding(multipartSchema, fieldsSchema),
+      multipartContent.encoding,
+      fileEncoding
+    )
+
     return {
       ...operation,
       requestBody: {
@@ -1901,18 +1961,8 @@ function applyMultipartRequestBody(
         content: {
           ...requestBody.content,
           'multipart/form-data': {
-            schema: mergeMultipartSchemaFields(
-              multipartContent.schema ?? {},
-              fieldsSchema
-            ),
-            ...(multipartContent.encoding || encoding
-              ? {
-                  encoding: {
-                    ...(multipartContent.encoding ?? {}),
-                    ...(encoding ?? {})
-                  }
-                }
-              : {})
+            schema: multipartSchema,
+            ...(encoding ? { encoding } : {})
           }
         }
       }
@@ -1925,6 +1975,14 @@ function applyMultipartRequestBody(
 
   const content = { ...requestBody.content }
   delete content['application/json']
+  const multipartSchema = mergeMultipartSchemaFields(
+    jsonContent.schema ?? {},
+    fieldsSchema
+  )
+  const encoding = mergeMultipartEncoding(
+    createMultipartTextEncoding(multipartSchema, fieldsSchema),
+    fileEncoding
+  )
 
   return {
     ...operation,
@@ -1933,7 +1991,7 @@ function applyMultipartRequestBody(
       content: {
         ...content,
         'multipart/form-data': {
-          schema: mergeMultipartSchemaFields(jsonContent.schema ?? {}, fieldsSchema),
+          schema: multipartSchema,
           ...(encoding ? { encoding } : {})
         }
       }

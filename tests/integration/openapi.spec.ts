@@ -590,6 +590,12 @@ describe('OpenAPI integration', () => {
     })
     expect(operation.requestBody.content['multipart/form-data'].encoding).toEqual(
       {
+        email: {
+          contentType: 'text/plain'
+        },
+        password: {
+          contentType: 'text/plain'
+        },
         avatar: {
           contentType: 'image/png, image/jpeg'
         }
