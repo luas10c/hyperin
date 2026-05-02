@@ -25,10 +25,10 @@ npm install hyperin
 
 - Fast radix-tree routing
 - Middleware pipeline with `next()`
-- Built-in helpers for JSON, cookies, compression, CORS, security, multipart, and static files
-- Typed request/response primitives
-- Express-like app settings API
-- Works directly with Node.js HTTP server
+- Built-in JSON, cookies, compression, CORS, security, multipart, and static file helpers
+- Typed request and response primitives
+- Express-like settings API
+- OpenAPI and Scalar support
 
 ## Quick Start
 
@@ -51,113 +51,14 @@ app.post('/users', ({ request, response }) => {
   }
 })
 
-app.listen(3000, '0.0.0.0' () => {
+app.listen(3000, () => {
   console.log('Server running at http://localhost:3000')
 })
 ```
 
-## Basic Usage
-
-```ts
-app.get('/health', () => 'ok')
-
-app.get('/users/:id', ({ request }) => {
-  return { id: request.params.id }
-})
-
-app.use('/api', async ({ next }) => {
-  await next()
-})
-```
-
-## Built-In Middleware
-
-```ts
-import {
-  compress,
-  cookies,
-  cors,
-  json,
-  logger,
-  multipart,
-  security,
-  serveStatic,
-  urlencoded
-} from 'hyperin/middleware'
-```
-
-## CORS
-
-For public APIs, the default `cors()` configuration is usually fine.
-
-When using cookies or other credentialed cross-origin requests, do not rely on a wildcard origin. Use an explicit allowlist instead.
-
-```ts
-import { cors } from 'hyperin/middleware'
-
-app.use(
-  cors({
-    origin: ['https://app.example.com', 'https://admin.example.com'],
-    credentials: true
-  })
-)
-```
-
-Avoid patterns like `cors({ origin: '*', credentials: true })` for private APIs.
-
-## Trust Proxy
-
-Use `trust proxy` only when your app is actually behind trusted reverse proxies.
-
-```ts
-app.set('trust proxy', true)
-app.set('trust proxy', 1)
-app.set('trust proxy', ['127.0.0.1', '::1', '10.0.0.0/8'])
-app.set('trust proxy', ({ remoteAddress }) => remoteAddress === '::1')
-app.set('trust proxy', async ({ remoteAddress }) => {
-  return remoteAddress === '127.0.0.1' || remoteAddress === '::1'
-})
-```
-
-Semantics:
-
-- `true`: trust every proxy hop; only safe when the app is not directly reachable
-- `1`: trust one proxy hop closest to the app
-- `string[]`: trust only exact IPs or CIDR ranges
-- `function`: decide per request from the immediate peer address
-
-Notes:
-
-- the callback receives the immediate peer connected to the app, not the final resolved client IP
-- prefer explicit IP/CIDR allowlists in production
-- `enable('trust proxy')` is still supported and is equivalent to `app.set('trust proxy', true)`
-
-Common deployments:
-
-- Nginx on the same host:
-
-```ts
-app.set('trust proxy', ['127.0.0.1', '::1'])
-```
-
-- Traefik or another reverse proxy on an internal network:
-
-```ts
-app.set('trust proxy', ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'])
-```
-
-- Cloudflare in front of one local proxy hop:
-
-```ts
-// Example: Cloudflare -> Nginx -> app
-app.set('trust proxy', 2)
-```
-
-Use hop counts only when the proxy chain is stable and known. Otherwise prefer explicit allowlists.
-
 ## Validation
 
-Route methods accept any number of handlers. When you need validation and documentation, pass the route options object as the last argument.
+Route methods accept multiple handlers. Pass the route options object as the last argument to add validation and documentation metadata.
 
 ```ts
 import hyperin from 'hyperin'
@@ -199,7 +100,7 @@ Supported Standard Schema libraries include:
 
 ## OpenAPI
 
-Hyperin can expose an OpenAPI document from the same route schemas.
+Generate an OpenAPI document from route schemas.
 
 ```ts
 import { openapi } from 'hyperin/openapi'
@@ -214,37 +115,30 @@ openapi(app, {
 })
 ```
 
-By default the document is available at `GET /openapi.json`.
-
-When a Standard Schema implementation exposes JSON Schema, Hyperin uses it directly.
-Otherwise, Hyperin falls back to a structural conversion based on the schema shape to keep the documentation working without depending on a specific library.
+The document is available at `GET /openapi.json` by default.
 
 ## Scalar
 
-Hyperin can also expose a Scalar UI for the generated OpenAPI document.
+Expose a Scalar UI for the generated OpenAPI document.
 
 ```ts
 import { scalar } from 'hyperin/scalar'
 
 scalar(app)
-// or
+
 scalar(app, {
-  path: '/docs', // default: /docs
-  url: '/openapi.json', // default /openapi.json
-  configuration: { // configuration is optional
+  path: '/docs',
+  url: '/openapi.json',
+  configuration: {
     theme: 'purple',
     layout: 'modern'
   }
 })
 ```
 
-By default, Scalar uses `API Reference` as its title and updates the browser title from `openapi.info.title` when the document is loaded.
-
 ## Documentation
 
-Full documentation is being prepared.
-
-For now, the codebase and tests are the best reference for the public API.
+Full documentation is being prepared. For now, the codebase and tests are the best reference for the public API.
 
 ## Contributing
 
