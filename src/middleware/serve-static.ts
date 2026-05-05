@@ -145,10 +145,16 @@ export function serveStatic(
         })
       }
 
-      return void pipeFile(resolvedIndex.path, resolvedIndex.stat, request, response, {
-        maxAge,
-        etag
-      })
+      return void pipeFile(
+        resolvedIndex.path,
+        resolvedIndex.stat,
+        request,
+        response,
+        {
+          maxAge,
+          etag
+        }
+      )
     }
 
     pipeFile(resolvedFile.path, fileStat, request, response, { maxAge, etag })

@@ -90,8 +90,8 @@ describe('trust proxy utilities', () => {
       resolveTrustedClientIp('10.0.0.1', '198.51.100.1', 0)
     ).resolves.toBe('10.0.0.1')
 
-    await expect(
-      shouldTrustForwardedHeaders('10.0.0.1', 0)
-    ).resolves.toBe(false)
+    await expect(shouldTrustForwardedHeaders('10.0.0.1', 0)).resolves.toBe(
+      false
+    )
   })
 })

@@ -339,7 +339,11 @@ export function compress(options: CompressOptions = {}): Middleware {
 
       if (passthrough) {
         if (normalized.encoding)
-          return originalWrite(normalized.chunk, normalized.encoding, normalized.cb)
+          return originalWrite(
+            normalized.chunk,
+            normalized.encoding,
+            normalized.cb
+          )
         return normalized.cb
           ? originalWrite(normalized.chunk, normalized.cb)
           : originalWrite(normalized.chunk)

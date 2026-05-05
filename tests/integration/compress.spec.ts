@@ -111,7 +111,9 @@ describe('compress middleware', () => {
     const app = hyperin()
     const payload = Buffer.alloc(256, 1)
 
-    app.use(compress({ encodings: ['gzip'], threshold: 32, maxBufferSize: 128 }))
+    app.use(
+      compress({ encodings: ['gzip'], threshold: 32, maxBufferSize: 128 })
+    )
     app.get('/binary-stream', ({ response }) => {
       response.type('application/octet-stream')
 
@@ -130,7 +132,9 @@ describe('compress middleware', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers['content-encoding']).toBeUndefined()
-    expect(response.body).toEqual(Buffer.concat([payload, payload, payload, payload]))
+    expect(response.body).toEqual(
+      Buffer.concat([payload, payload, payload, payload])
+    )
   })
 
   test('supports response.write callback overload while compressing', async () => {

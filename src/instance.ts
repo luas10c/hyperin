@@ -1097,7 +1097,6 @@ class Hyperin {
       if (this.#shuttingDown && this.#activeRequests <= this.#drainTarget) {
         this.#drainResolve?.()
       }
-
     }
     rawResponse.once('finish', finalizeRequest)
     rawResponse.once('close', finalizeRequest)
@@ -1438,7 +1437,6 @@ class Hyperin {
 
       if (exitOptions.autoExit ?? true) {
         process.exit(exitOptions.timeoutExitCode ?? 1)
-        return
       }
 
       throw error
@@ -1451,7 +1449,6 @@ class Hyperin {
 
       if (exitOptions.autoExit ?? true) {
         process.exit(exitOptions.timeoutExitCode ?? 1)
-        return
       }
 
       if (!(exitOptions.autoExit ?? true)) {

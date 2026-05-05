@@ -53,7 +53,9 @@ describe('Request integration', () => {
 
     app.get('/search', ({ request }) => request.query)
 
-    const response: Response = await request(app).get('/search?tag=a&tag=b&tag=c')
+    const response: Response = await request(app).get(
+      '/search?tag=a&tag=b&tag=c'
+    )
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ tag: ['a', 'b', 'c'] })
