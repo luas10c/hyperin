@@ -574,7 +574,7 @@ export interface Application extends Server<typeof Request, typeof Response> {
   all: RouteMethod<Application>
   route: Hyperin['route']
   shutdown: Hyperin['shutdown']
-  graceful: Hyperin['graceful']
+  graceful: (options?: ShutdownOptions) => Application
   gracefulExit: Hyperin['gracefulExit']
   handler: Hyperin['handler']
 }
@@ -1552,6 +1552,11 @@ export function hyperin(): Application {
     return app
   }
 
+  function graceful(options: ShutdownOptions = {}): Application {
+    core.graceful(options)
+    return app
+  }
+
   // The app is the server itself — thus supertest(app) works directly.
   // Métodos de rota e middleware são adicionados via Object.assign.
   const app = Object.assign(server, {
@@ -1583,10 +1588,7 @@ export function hyperin(): Application {
     all: createRouteMethod('all'),
     route: core.route.bind(core),
     shutdown: core.shutdown.bind(core),
-    graceful: (options: ShutdownOptions = {}) => {
-      core.graceful(options)
-      return app
-    },
+    graceful,
     gracefulExit: core.gracefulExit.bind(core),
     handler: core.handler
   }) as Application

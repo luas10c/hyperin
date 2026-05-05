@@ -534,6 +534,7 @@ describe('Instance integration', () => {
       await shutdownPromise
     } finally {
       agent.destroy()
+      if (server.listening) await app.shutdown()
     }
   })
 
@@ -830,6 +831,10 @@ describe('Instance integration', () => {
   test('propagates client abort through request.signal and keeps the server healthy', async () => {
     const app = createInstance()
     let aborted = false
+    let requestAborted!: () => void
+    const requestAbortedPromise = new Promise<void>((resolve) => {
+      requestAborted = resolve
+    })
 
     app.post('/stream', async ({ request }) => {
       await new Promise<void>((resolve) => {
@@ -837,6 +842,7 @@ describe('Instance integration', () => {
           'abort',
           () => {
             aborted = true
+            requestAborted()
             resolve()
           },
           { once: true }
@@ -871,7 +877,7 @@ describe('Instance integration', () => {
         setTimeout(() => req.destroy(), 10)
       })
 
-      await new Promise((resolve) => setTimeout(resolve, 30))
+      await requestAbortedPromise
 
       expect(aborted).toBe(true)
 

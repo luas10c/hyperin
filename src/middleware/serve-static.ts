@@ -30,14 +30,23 @@ export function serveStatic(
     return code === 'ENOENT' || code === 'ENOTDIR'
   }
 
-  const isPathInsideRoot = async (targetPath: string): Promise<boolean> => {
+  const resolvePathWithinRoot = async (
+    targetPath: string
+  ): Promise<{ path: string; stat: Stats }> => {
     const [rootDirectory, resolvedTarget] = await Promise.all([
       rootDirectoryPromise,
       realpath(targetPath)
     ])
-
     const rel = relative(rootDirectory, resolvedTarget)
-    return !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 })
+    }
+
+    return {
+      path: resolvedTarget,
+      stat: await stat(resolvedTarget)
+    }
   }
 
   return async ({ request, response, next }) => {
@@ -81,10 +90,17 @@ export function serveStatic(
       }
     }
 
-    let fileStat: Stats
+    let resolvedFile: { path: string; stat: Stats }
     try {
-      fileStat = await stat(filePath)
+      resolvedFile = await resolvePathWithinRoot(filePath)
     } catch (error) {
+      if ((error as { status?: number }).status === 403) {
+        return void response.status(403).json({
+          statusCode: 403,
+          message: 'Forbidden'
+        })
+      }
+
       if (isMissingPathError(error)) {
         await next()
         return
@@ -96,6 +112,8 @@ export function serveStatic(
       })
     }
 
+    const fileStat = resolvedFile.stat
+
     // Directory → attempts to serve index
     if (fileStat.isDirectory()) {
       if (!index) {
@@ -104,11 +122,18 @@ export function serveStatic(
       }
 
       const indexFile = index === true ? 'index.html' : index
-      const indexPath = join(filePath, indexFile)
-      let indexStat: Stats
+      const indexPath = join(resolvedFile.path, indexFile)
+      let resolvedIndex: { path: string; stat: Stats }
       try {
-        indexStat = await stat(indexPath)
+        resolvedIndex = await resolvePathWithinRoot(indexPath)
       } catch (error) {
+        if ((error as { status?: number }).status === 403) {
+          return void response.status(403).json({
+            statusCode: 403,
+            message: 'Forbidden'
+          })
+        }
+
         if (isMissingPathError(error)) {
           await next()
           return
@@ -120,26 +145,12 @@ export function serveStatic(
         })
       }
 
-      if (!(await isPathInsideRoot(indexPath))) {
-        return void response.status(403).json({
-          statusCode: 403,
-          message: 'Forbidden'
-        })
-      }
-
-      return void pipeFile(indexPath, indexStat, request, response, {
+      return void pipeFile(resolvedIndex.path, resolvedIndex.stat, request, response, {
         maxAge,
         etag
       })
     }
 
-    if (!(await isPathInsideRoot(filePath))) {
-      return void response.status(403).json({
-        statusCode: 403,
-        message: 'Forbidden'
-      })
-    }
-
-    pipeFile(filePath, fileStat, request, response, { maxAge, etag })
+    pipeFile(resolvedFile.path, fileStat, request, response, { maxAge, etag })
   }
 }
