@@ -33,7 +33,7 @@ npm install hyperin
 ## Quick Start
 
 ```ts
-import hyperin from 'hyperin'
+import { hyperin } from 'hyperin'
 import { json } from 'hyperin/middleware'
 
 const app = hyperin()
@@ -61,7 +61,7 @@ app.listen(3000, () => {
 Route methods accept multiple handlers. Pass the route options object as the last argument to add validation and documentation metadata.
 
 ```ts
-import hyperin from 'hyperin'
+import { hyperin } from 'hyperin'
 import { json } from 'hyperin/middleware'
 import { z } from 'zod'
 
