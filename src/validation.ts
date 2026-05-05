@@ -38,11 +38,26 @@ type PreparedValidator = {
   run: ValidatorRunner
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
 function isStandardSchemaLike(schema: unknown): schema is StandardSchemaV1 {
   return (
     schema != null &&
     typeof schema === 'object' &&
     typeof (schema as StandardSchemaV1)['~standard']?.validate === 'function'
+  )
+}
+
+function isSchemaFieldMap(
+  schema: unknown
+): schema is Record<string, StandardSchemaV1> {
+  return (
+    isObjectRecord(schema) &&
+    Object.values(schema).every((fieldSchema) =>
+      isStandardSchemaLike(fieldSchema)
+    )
   )
 }
 
@@ -86,6 +101,35 @@ function createPreparedValidator(
       source,
       run: async (data: unknown): Promise<ValidationOutcome> =>
         normalizeStandardResult(await schema['~standard'].validate(data))
+    }
+  }
+
+  if (isSchemaFieldMap(schema)) {
+    return {
+      source,
+      run: async (data: unknown): Promise<ValidationOutcome> => {
+        if (!isObjectRecord(data)) {
+          return { ok: false, details: [{ message: 'Expected object' }] }
+        }
+
+        const output: Record<string, unknown> = {}
+        const issues: unknown[] = []
+
+        for (const [key, fieldSchema] of Object.entries(schema)) {
+          const result = await fieldSchema['~standard'].validate(data[key])
+
+          if (Array.isArray(result.issues)) {
+            issues.push(...result.issues)
+            continue
+          }
+
+          if ('value' in result) output[key] = result.value
+        }
+
+        return issues.length > 0
+          ? { ok: false, details: issues }
+          : { ok: true, data: output }
+      }
     }
   }
 

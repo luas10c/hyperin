@@ -1564,6 +1564,69 @@ describe('OpenAPI integration', () => {
     })
   })
 
+  test('accepts response content shorthand strings', async () => {
+    const app = hyperin()
+
+    app.get('/users', () => ({ ok: true }), {
+      responses: {
+        200: {
+          description: 'ok',
+          content: 'application/json',
+          schema: {
+            type: 'object',
+            properties: { ok: { type: 'boolean' } },
+            required: ['ok']
+          }
+        }
+      }
+    })
+
+    openapi(app)
+
+    const response = await request(app).get('/openapi.json')
+    const operation = response.body.paths['/users'].get
+
+    expect(response.status).toBe(200)
+    expect(operation.responses['200'].content).toEqual({
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: { ok: { type: 'boolean' } },
+          required: ['ok']
+        }
+      }
+    })
+  })
+
+  test('accepts requestBody content shorthand strings', async () => {
+    const app = hyperin()
+
+    app.post('/users', () => ({ ok: true }), {
+      requestBody: {
+        required: true,
+        content: 'application/json'
+      },
+      responses: {
+        200: {
+          description: 'ok'
+        }
+      }
+    })
+
+    openapi(app)
+
+    const response = await request(app).get('/openapi.json')
+    const operation = response.body.paths['/users'].post
+
+    expect(response.status).toBe(200)
+    expect(operation.requestBody).toEqual({
+      required: true,
+      content: {
+        'application/json': {}
+      }
+    })
+  })
+
   test('normalizes any response status alias to default', async () => {
     const app = hyperin()
 

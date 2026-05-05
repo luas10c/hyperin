@@ -58,4 +58,40 @@ describe('trust proxy utilities', () => {
       shouldTrustForwardedHeaders('127.0.0.1', trustProxy)
     ).resolves.toBe(true)
   })
+
+  test('ignores forwarded headers when custom trust proxy returns false', async () => {
+    const trustProxy = ({ remoteAddress }: { remoteAddress?: string }) => {
+      return remoteAddress === '10.0.0.1'
+    }
+
+    await expect(
+      resolveTrustedClientIp('127.0.0.1', '198.51.100.1', trustProxy)
+    ).resolves.toBe('127.0.0.1')
+
+    await expect(
+      shouldTrustForwardedHeaders('127.0.0.1', trustProxy)
+    ).resolves.toBe(false)
+  })
+
+  test('ignores forwarded headers when async trust proxy returns false', async () => {
+    const trustProxy = async () => false
+
+    await expect(
+      resolveTrustedClientIp('127.0.0.1', '198.51.100.1', trustProxy)
+    ).resolves.toBe('127.0.0.1')
+
+    await expect(
+      shouldTrustForwardedHeaders('127.0.0.1', trustProxy)
+    ).resolves.toBe(false)
+  })
+
+  test('does not trust invalid or zero hop counts', async () => {
+    await expect(
+      resolveTrustedClientIp('10.0.0.1', '198.51.100.1', 0)
+    ).resolves.toBe('10.0.0.1')
+
+    await expect(
+      shouldTrustForwardedHeaders('10.0.0.1', 0)
+    ).resolves.toBe(false)
+  })
 })

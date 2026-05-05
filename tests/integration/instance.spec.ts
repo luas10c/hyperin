@@ -1,8 +1,12 @@
-import { describe, expect, test } from '@jest/globals'
-import { request as sendHttpRequest } from 'node:http'
+import { afterEach, describe, expect, jest, test } from '@jest/globals'
+import { Agent, request as sendHttpRequest } from 'node:http'
+import { Duplex } from 'node:stream'
 import request, { type Response } from 'supertest'
+import { z } from 'zod'
 
 import hyperin, { hyperin as createInstance } from '#/instance'
+import { Request as HyperinRequest } from '#/request'
+import { Response as HyperinResponse } from '#/response'
 
 type ErrorResponse = {
   statusCode?: number
@@ -11,6 +15,10 @@ type ErrorResponse = {
 }
 
 describe('Instance integration', () => {
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
   test('returns string handler output as text with x-powered-by header enabled', async () => {
     const app = hyperin()
     app.get('/hello', () => 'ok')
@@ -85,6 +93,25 @@ describe('Instance integration', () => {
     expect(response.body).toEqual({ status: 'ok' })
   })
 
+  test('validates route params declared as a schema field map', async () => {
+    const app = createInstance()
+
+    app.get(
+      '/:email',
+      ({ request }) => ({ email: request.params.email }),
+      {
+        params: { email: z.string().email() }
+      }
+    )
+
+    const validResponse = await request(app).get('/john@example.com')
+    const invalidResponse = await request(app).get('/invalid-email')
+
+    expect(validResponse.status).toBe(200)
+    expect(validResponse.body).toEqual({ email: 'john@example.com' })
+    expect(invalidResponse.status).toBe(422)
+  })
+
   test('preserves request.url in scoped middleware', async () => {
     const app = createInstance()
 
@@ -104,6 +131,38 @@ describe('Instance integration', () => {
       path: '/admin',
       query: { foo: 'bar' }
     })
+  })
+
+  test('handler initializes request extension fields on plain incoming messages', async () => {
+    const app = createInstance()
+    const socket = new Duplex({
+      read() {},
+      write(_chunk, _encoding, callback) {
+        callback()
+      }
+    })
+    const rawRequest = new HyperinRequest(socket)
+
+    rawRequest.url = '/health'
+    rawRequest.method = 'GET'
+    rawRequest.headers = { host: 'localhost' }
+    delete (rawRequest as unknown as { locals?: unknown }).locals
+    delete (rawRequest as unknown as { params?: unknown }).params
+    delete (rawRequest as unknown as { files?: unknown }).files
+    delete (rawRequest as unknown as { cookies?: unknown }).cookies
+    delete (rawRequest as unknown as { signedCookies?: unknown }).signedCookies
+
+    app.get('/health', ({ request }) => ({
+      locals: request.locals,
+      params: request.params,
+      files: request.files,
+      cookies: request.cookies,
+      signedCookies: request.signedCookies
+    }))
+
+    await expect(
+      app.handler(rawRequest, new HyperinResponse(rawRequest))
+    ).resolves.toBeUndefined()
   })
 
   test('exposes forwarded ip only when trust proxy is enabled in app flow', async () => {
@@ -185,6 +244,20 @@ describe('Instance integration', () => {
     expect(response.body).toEqual({ ip: '198.51.100.1' })
   })
 
+  test('ignores forwarded ip when trust proxy function rejects peer', async () => {
+    const app = createInstance()
+
+    app.set('trust proxy', ({ remoteAddress }) => remoteAddress === '10.0.0.1')
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '127.0.0.1' })
+  })
+
   test('supports async trust proxy functions through app.set', async () => {
     const app = createInstance()
     let calls = 0
@@ -205,6 +278,49 @@ describe('Instance integration', () => {
     expect(calls).toBe(1)
   })
 
+  test('ignores forwarded ip when async trust proxy function rejects peer', async () => {
+    const app = createInstance()
+
+    app.set('trust proxy', async () => false)
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '127.0.0.1' })
+  })
+
+  test('disable trust proxy ignores forwarded headers after enable', async () => {
+    const app = createInstance()
+
+    app.enable('trust proxy')
+    app.disable('trust proxy')
+    app.get('/ip', ({ request }) => ({ ip: request.ipAddress }))
+
+    const response: Response = await request(app)
+      .get('/ip')
+      .set('X-Forwarded-For', '198.51.100.1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ip: '127.0.0.1' })
+  })
+
+  test('rejects invalid trust proxy values through app.set', () => {
+    const app = createInstance()
+
+    expect(() => app.set('trust proxy', -1)).toThrow(
+      'trust proxy hop count must be a non-negative integer'
+    )
+    expect(() => app.set('trust proxy', 1.5)).toThrow(
+      'trust proxy hop count must be a non-negative integer'
+    )
+    expect(() =>
+      app.set('trust proxy', '127.0.0.1' as unknown as never)
+    ).toThrow('Invalid value for trust proxy')
+  })
+
   test('shutdown closes the public server instance', async () => {
     const app = createInstance()
 
@@ -215,6 +331,290 @@ describe('Instance integration', () => {
     await app.shutdown()
 
     expect(server.listening).toBe(false)
+  })
+
+  test('shutdown runs onShutdown when requests are drained', async () => {
+    const app = createInstance()
+    const onShutdown = jest.fn()
+
+    app.get('/health', () => ({ ok: true }))
+    app.listen(0)
+
+    await app.shutdown({ onShutdown })
+
+    expect(onShutdown).toHaveBeenCalledTimes(1)
+  })
+
+  test('shutdown waits for in-flight requests before resolving', async () => {
+    const app = createInstance()
+    const onShutdown = jest.fn()
+    let releaseRequest!: () => void
+    const requestReleased = new Promise<void>((resolve) => {
+      releaseRequest = resolve
+    })
+    let requestStarted!: () => void
+    const requestStartedPromise = new Promise<void>((resolve) => {
+      requestStarted = resolve
+    })
+
+    app.get('/slow', async () => {
+      requestStarted()
+      await requestReleased
+      return { ok: true }
+    })
+
+    const server = app.listen(0)
+    const address = server.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+
+    const responsePromise = new Promise<{ status: number; body: string }>(
+      (resolve, reject) => {
+        const req = sendHttpRequest(
+          { method: 'GET', port, path: '/slow' },
+          (res) => {
+            const chunks: Buffer[] = []
+            res.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+            res.on('end', () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                body: Buffer.concat(chunks).toString('utf8')
+              })
+            )
+          }
+        )
+        req.on('error', reject)
+        req.end()
+      }
+    )
+
+    try {
+      await requestStartedPromise
+
+      let shutdownResolved = false
+      const shutdownPromise = app.shutdown({
+        timeout: 1_000,
+        onShutdown
+      }).then(() => {
+        shutdownResolved = true
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(shutdownResolved).toBe(false)
+
+      releaseRequest()
+      const response = await responsePromise
+      await shutdownPromise
+
+      expect(response.status).toBe(200)
+      expect(JSON.parse(response.body)).toEqual({ ok: true })
+      expect(onShutdown).toHaveBeenCalledTimes(1)
+      expect(shutdownResolved).toBe(true)
+    } finally {
+      if (server.listening) await app.shutdown()
+    }
+  })
+
+  test('shutdown runs onTimeout when in-flight requests do not drain', async () => {
+    const app = createInstance()
+    const onShutdown = jest.fn()
+    const onTimeout = jest.fn()
+    let releaseRequest!: () => void
+    const requestReleased = new Promise<void>((resolve) => {
+      releaseRequest = resolve
+    })
+    let requestStarted!: () => void
+    const requestStartedPromise = new Promise<void>((resolve) => {
+      requestStarted = resolve
+    })
+
+    app.get('/hang', async () => {
+      requestStarted()
+      await requestReleased
+    })
+
+    const server = app.listen(0)
+    const address = server.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+    const responsePromise = new Promise<void>((resolve) => {
+      const req = sendHttpRequest(
+        { method: 'GET', port, path: '/hang' },
+        (res) => {
+          res.resume()
+          res.on('end', resolve)
+        }
+      )
+      req.on('error', () => resolve())
+      req.end()
+    })
+
+    try {
+      await requestStartedPromise
+      await app.shutdown({ timeout: 1, onShutdown, onTimeout })
+      releaseRequest()
+      await responsePromise
+    } finally {
+      releaseRequest()
+      if (server.listening) await app.shutdown()
+    }
+
+    expect(onTimeout).toHaveBeenCalledTimes(1)
+    expect(onShutdown).not.toHaveBeenCalled()
+  })
+
+  test('rejects keep-alive requests that arrive after shutdown starts', async () => {
+    const app = createInstance()
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 })
+    let releaseFirstRequest!: () => void
+    const firstRequestReleased = new Promise<void>((resolve) => {
+      releaseFirstRequest = resolve
+    })
+    let firstRequestStarted!: () => void
+    const firstRequestStartedPromise = new Promise<void>((resolve) => {
+      firstRequestStarted = resolve
+    })
+
+    app.get('/slow', async () => {
+      firstRequestStarted()
+      await firstRequestReleased
+      return { ok: true }
+    })
+    app.get('/next', () => ({ ok: true }))
+
+    const server = app.listen(0)
+    const address = server.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+
+    try {
+      const firstResponsePromise = new Promise<number>((resolve, reject) => {
+        const req = sendHttpRequest(
+          { agent, method: 'GET', port, path: '/slow' },
+          (res) => {
+            res.resume()
+            res.on('end', () => resolve(res.statusCode ?? 0))
+          }
+        )
+        req.on('error', reject)
+        req.end()
+      })
+
+      await firstRequestStartedPromise
+      const shutdownPromise = app.shutdown({ timeout: 1_000 })
+
+      const secondResponsePromise = new Promise<number>((resolve, reject) => {
+        const req = sendHttpRequest(
+          { agent, method: 'GET', port, path: '/next' },
+          (res) => {
+            res.resume()
+            res.on('end', () => resolve(res.statusCode ?? 0))
+          }
+        )
+        req.on('error', reject)
+        req.end()
+      })
+
+      releaseFirstRequest()
+
+      await expect(firstResponsePromise).resolves.toBe(200)
+      await expect(secondResponsePromise).resolves.toBe(503)
+      await shutdownPromise
+    } finally {
+      agent.destroy()
+    }
+  })
+
+  test('graceful registers signal handlers and runs configured callbacks', async () => {
+    const app = createInstance()
+    const handlers = new Map<string | symbol, (...args: unknown[]) => void>()
+    const onShutdown = jest.fn()
+    const onGracefulExit = jest.fn()
+
+    jest.spyOn(process, 'once').mockImplementation((event, listener) => {
+      handlers.set(event, listener as (...args: unknown[]) => void)
+      return process
+    })
+
+    const result = app.graceful({
+      autoExit: false,
+      exitCode: 7,
+      signals: ['SIGUSR2'],
+      onShutdown,
+      onGracefulExit
+    })
+
+    expect(result).toBe(app)
+    expect(process.once).toHaveBeenCalledWith('SIGUSR2', expect.any(Function))
+
+    handlers.get('SIGUSR2')?.()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(onShutdown).toHaveBeenCalledTimes(1)
+    expect(onGracefulExit).toHaveBeenCalledWith({ code: 7 })
+  })
+
+  test('gracefulExit runs shutdown and graceful exit hooks without exiting when autoExit is false', async () => {
+    const app = createInstance()
+    const exitSpy = jest.spyOn(process, 'exit')
+    const onShutdown = jest.fn()
+    const onGracefulExit = jest.fn()
+
+    await app.gracefulExit(2, {
+      autoExit: false,
+      onShutdown,
+      onGracefulExit
+    })
+
+    expect(onShutdown).toHaveBeenCalledTimes(1)
+    expect(onGracefulExit).toHaveBeenCalledWith({ code: 2 })
+    expect(exitSpy).not.toHaveBeenCalled()
+  })
+
+  test('gracefulExit exits with the provided code when autoExit is true', async () => {
+    const app = createInstance()
+    const exitSpy = jest
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never)
+
+    await app.gracefulExit(3, { autoExit: true })
+
+    expect(exitSpy).toHaveBeenCalledWith(3)
+  })
+
+  test('gracefulExit propagates onGracefulExit errors when autoExit is false', async () => {
+    const app = createInstance()
+
+    await expect(
+      app.gracefulExit(0, {
+        autoExit: false,
+        onGracefulExit() {
+          throw new Error('graceful exit failed')
+        }
+      })
+    ).rejects.toThrow('graceful exit failed')
+  })
+
+  test('gracefulExit propagates shutdown errors when autoExit is false', async () => {
+    const app = createInstance()
+
+    await expect(
+      app.gracefulExit(0, {
+        autoExit: false,
+        onShutdown() {
+          throw new Error('shutdown failed')
+        }
+      })
+    ).rejects.toThrow('shutdown failed')
+  })
+
+  test('gracefulExit rejects when onGracefulExit exceeds the timeout and autoExit is false', async () => {
+    const app = createInstance()
+
+    await expect(
+      app.gracefulExit(0, {
+        autoExit: false,
+        timeout: 1,
+        onGracefulExit: () => new Promise(() => undefined)
+      })
+    ).rejects.toThrow('Graceful exit timed out')
   })
 
   test('error middleware intercepts exceptions', async () => {

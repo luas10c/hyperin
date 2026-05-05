@@ -79,6 +79,12 @@ export type OpenAPIContent<TMediaType = OpenAPIMediaType> = Partial<
   Record<OpenAPIContentType, TMediaType>
 >
 
+export type OpenAPIContentShorthand = OpenAPIContentType
+
+export type DescribeOperationContentInput =
+  | OpenAPIContent<OpenAPIMediaTypeInput>
+  | OpenAPIContentShorthand
+
 export interface OpenAPILink {
   operationRef?: string
   operationId?: string
@@ -447,14 +453,14 @@ export interface DescribeOperationRequestBody extends Omit<
   OpenAPIRequestBody,
   'content'
 > {
-  content: OpenAPIContent<OpenAPIMediaTypeInput>
+  content: DescribeOperationContentInput
 }
 
 export interface DescribeOperationResponse {
   description?: string
   schema?: unknown
   contentType?: string
-  content?: OpenAPIContent<OpenAPIMediaTypeInput>
+  content?: DescribeOperationContentInput
   headers?: Record<
     string,
     | unknown
@@ -1539,18 +1545,45 @@ function normalizeMediaType(
   }
 }
 
+function normalizeContent(
+  content:
+    | DescribeOperationContentInput
+    | OpenAPIContent<OpenAPIMediaType>
+    | undefined,
+  direction: SchemaDirection,
+  context: OpenAPIConversionContext
+): Record<string, OpenAPIMediaType> | undefined {
+  if (content === undefined) return undefined
+
+  if (typeof content === 'string') {
+    return {
+      [content]: {}
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(content).map(([contentType, entry]) => [
+      contentType,
+      normalizeMediaType(entry, direction, context)
+    ])
+  ) as Record<string, OpenAPIMediaType>
+}
+
 function normalizeRequestBody(
   requestBody: DescribeOperationRequestBody | OpenAPIRequestBody,
   context: OpenAPIConversionContext
 ): OpenAPIRequestBody {
+  const normalizedContent = normalizeContent(
+    requestBody.content as
+      | DescribeOperationContentInput
+      | OpenAPIContent<OpenAPIMediaType>,
+    'input',
+    context
+  )
+
   return {
     ...requestBody,
-    content: Object.fromEntries(
-      Object.entries(requestBody.content).map(([contentType, entry]) => [
-        contentType,
-        normalizeMediaType(entry, 'input', context)
-      ])
-    )
+    content: normalizedContent ?? {}
   }
 }
 
@@ -1561,14 +1594,16 @@ function normalizeResponse(
   const { schema, contentType, ...rest } = response as
     | DescribeOperationResponse
     | (OpenAPIResponse & { schema?: unknown; contentType?: string })
-  const normalizedContent = response.content
-    ? (Object.fromEntries(
-        Object.entries(response.content).map(([contentType, entry]) => [
-          contentType,
-          normalizeMediaType(entry, 'output', context)
-        ])
-      ) as Record<string, OpenAPIMediaType>)
-    : undefined
+  const shorthandContentType =
+    typeof response.content === 'string' ? response.content : undefined
+  const normalizedContent = normalizeContent(
+    response.content as
+      | DescribeOperationContentInput
+      | OpenAPIContent<OpenAPIMediaType>
+      | undefined,
+    'output',
+    context
+  )
 
   const normalizedHeaders = response.headers
     ? (Object.fromEntries(
@@ -1584,7 +1619,8 @@ function normalizeResponse(
   >
 
   if (schema !== undefined) {
-    const resolvedContentType = contentType ?? 'application/json'
+    const resolvedContentType =
+      shorthandContentType ?? contentType ?? 'application/json'
     const description = response.description ?? 'Successful response'
 
     return {
