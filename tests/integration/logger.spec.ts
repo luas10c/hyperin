@@ -1,6 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals'
 
-import { createLogger, type LoggerEvent } from '#/logger'
+import { createLogger, type LoggerEvent, type LoggerTransport } from '#/logger'
 
 describe('logger', () => {
   test('emits application logs through configured transports', () => {
@@ -51,7 +51,7 @@ describe('logger', () => {
   })
 
   test('does not emit application logs when disabled', () => {
-    const transport = jest.fn()
+    const transport = jest.fn<LoggerTransport>()
     const logger = createLogger({
       enabled: false,
       level: 'info',

@@ -905,7 +905,9 @@ describe('multipart middleware', () => {
         }
       })
     )
-    app.post('/upload', ({ response }) => response.send('ok'))
+    app.post('/upload', ({ response }) => {
+      response.send('ok')
+    })
 
     const response: Response = await request(app)
       .post('/upload')

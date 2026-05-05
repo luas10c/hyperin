@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
 import { Agent, request as sendHttpRequest } from 'node:http'
+import type { Socket } from 'node:net'
 import { Duplex } from 'node:stream'
 import request, { type Response } from 'supertest'
 
@@ -148,7 +149,7 @@ describe('Instance integration', () => {
         callback()
       }
     })
-    const rawRequest = new HyperinRequest(socket)
+    const rawRequest = new HyperinRequest(socket as unknown as Socket)
 
     rawRequest.url = '/health'
     rawRequest.method = 'GET'
@@ -342,7 +343,7 @@ describe('Instance integration', () => {
 
   test('shutdown runs onShutdown when requests are drained', async () => {
     const app = createInstance()
-    const onShutdown = jest.fn()
+    const onShutdown = jest.fn<() => void>()
 
     app.get('/health', () => ({ ok: true }))
     app.listen(0)
@@ -354,7 +355,7 @@ describe('Instance integration', () => {
 
   test('shutdown waits for in-flight requests before resolving', async () => {
     const app = createInstance()
-    const onShutdown = jest.fn()
+    const onShutdown = jest.fn<() => void>()
     let releaseRequest!: () => void
     const requestReleased = new Promise<void>((resolve) => {
       releaseRequest = resolve
@@ -431,8 +432,8 @@ describe('Instance integration', () => {
 
   test('shutdown runs onTimeout when in-flight requests do not drain', async () => {
     const app = createInstance()
-    const onShutdown = jest.fn()
-    const onTimeout = jest.fn()
+    const onShutdown = jest.fn<() => void>()
+    const onTimeout = jest.fn<() => void>()
     let releaseRequest!: () => void
     const requestReleased = new Promise<void>((resolve) => {
       releaseRequest = resolve
@@ -541,8 +542,8 @@ describe('Instance integration', () => {
   test('graceful registers signal handlers and runs configured callbacks', async () => {
     const app = createInstance()
     const handlers = new Map<string | symbol, (...args: unknown[]) => void>()
-    const onShutdown = jest.fn()
-    const onGracefulExit = jest.fn()
+    const onShutdown = jest.fn<() => void>()
+    const onGracefulExit = jest.fn<(ctx: { code: number }) => void>()
 
     jest.spyOn(process, 'once').mockImplementation((event, listener) => {
       handlers.set(event, listener as (...args: unknown[]) => void)
@@ -570,8 +571,8 @@ describe('Instance integration', () => {
   test('gracefulExit runs shutdown and graceful exit hooks without exiting when autoExit is false', async () => {
     const app = createInstance()
     const exitSpy = jest.spyOn(process, 'exit')
-    const onShutdown = jest.fn()
-    const onGracefulExit = jest.fn()
+    const onShutdown = jest.fn<() => void>()
+    const onGracefulExit = jest.fn<(ctx: { code: number }) => void>()
 
     await app.gracefulExit(2, {
       autoExit: false,
