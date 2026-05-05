@@ -105,7 +105,15 @@ export class Request<
             equals === -1
               ? ''
               : Request.#decodeQueryComponent(entry.slice(equals + 1))
-          parsed[key] = value
+          const current = parsed[key]
+
+          if (current === undefined) {
+            parsed[key] = value
+          } else if (Array.isArray(current)) {
+            current.push(value)
+          } else {
+            parsed[key] = [current, value]
+          }
         }
       }
 

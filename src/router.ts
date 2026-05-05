@@ -150,11 +150,8 @@ function isErrorMiddleware(fn: Handler | ErrorMiddleware): boolean {
     return destructured
   }
 
-  const result = /\b(?:var|let|const)\s+(?:\{[^}]*\berror\b|error\s*=)/.test(
-    src
-  )
-  errorMwCache.set(fn, result)
-  return result
+  errorMwCache.set(fn, false)
+  return false
 }
 
 function normalizeRoutePath(path: string): string {

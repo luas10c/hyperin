@@ -222,4 +222,18 @@ describe('RadixRouter', () => {
 
     expect(router.errorMiddlewares).toHaveLength(1)
   })
+
+  test('does not misclassify normal middleware that declares a local error variable', () => {
+    const router = new RadixRouter()
+    const middleware: Handler = ({ next }) => {
+      const error = false
+      void error
+      return next()
+    }
+
+    router.use(middleware)
+
+    expect(router.errorMiddlewares).toHaveLength(0)
+    expect(router.middlewaresList).toEqual([middleware])
+  })
 })

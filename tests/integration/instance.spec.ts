@@ -2,7 +2,6 @@ import { afterEach, describe, expect, jest, test } from '@jest/globals'
 import { Agent, request as sendHttpRequest } from 'node:http'
 import { Duplex } from 'node:stream'
 import request, { type Response } from 'supertest'
-import { z } from 'zod'
 
 import hyperin, { hyperin as createInstance } from '#/instance'
 import { Request as HyperinRequest } from '#/request'
@@ -12,6 +11,18 @@ type ErrorResponse = {
   statusCode?: number
   message?: string
   error?: string
+}
+
+function emailSchema() {
+  return {
+    '~standard': {
+      validate(value: unknown) {
+        return typeof value === 'string' && value.includes('@')
+          ? { value }
+          : { issues: [{ message: 'Expected valid email' }] }
+      }
+    }
+  }
 }
 
 describe('Instance integration', () => {
@@ -96,13 +107,9 @@ describe('Instance integration', () => {
   test('validates route params declared as a schema field map', async () => {
     const app = createInstance()
 
-    app.get(
-      '/:email',
-      ({ request }) => ({ email: request.params.email }),
-      {
-        params: { email: z.string().email() }
-      }
-    )
+    app.get('/:email', ({ request }) => ({ email: request.params.email }), {
+      params: { email: emailSchema() }
+    })
 
     const validResponse = await request(app).get('/john@example.com')
     const invalidResponse = await request(app).get('/invalid-email')
@@ -370,7 +377,13 @@ describe('Instance integration', () => {
     const responsePromise = new Promise<{ status: number; body: string }>(
       (resolve, reject) => {
         const req = sendHttpRequest(
-          { method: 'GET', port, path: '/slow' },
+          {
+            method: 'GET',
+            port,
+            path: '/slow',
+            headers: { Connection: 'close' },
+            agent: false
+          },
           (res) => {
             const chunks: Buffer[] = []
             res.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
@@ -391,14 +404,16 @@ describe('Instance integration', () => {
       await requestStartedPromise
 
       let shutdownResolved = false
-      const shutdownPromise = app.shutdown({
-        timeout: 1_000,
-        onShutdown
-      }).then(() => {
-        shutdownResolved = true
-      })
+      const shutdownPromise = app
+        .shutdown({
+          timeout: 1_000,
+          onShutdown
+        })
+        .then(() => {
+          shutdownResolved = true
+        })
 
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      await Promise.resolve()
       expect(shutdownResolved).toBe(false)
 
       releaseRequest()

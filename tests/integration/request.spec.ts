@@ -5,7 +5,7 @@ import { hyperin } from '#/instance'
 
 type RequestPayload = {
   params: Record<string, string>
-  query: Record<string, string>
+  query: Record<string, string | string[]>
   path: string
   contentType: string | null
 }
@@ -46,5 +46,43 @@ describe('Request integration', () => {
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ ok: '1' })
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  test('preserves repeated query keys as arrays', async () => {
+    const app = hyperin()
+
+    app.get('/search', ({ request }) => request.query)
+
+    const response: Response = await request(app).get('/search?tag=a&tag=b&tag=c')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ tag: ['a', 'b', 'c'] })
+  })
+
+  test('restores original path for error middleware after scoped middleware throws', async () => {
+    const app = hyperin()
+
+    app.use('/welcome', () => {
+      throw new Error('scoped failure')
+    })
+
+    app.use(({ error, request, response }) => {
+      response.status(500).json({
+        message: error.message,
+        path: request.path,
+        query: request.query,
+        url: request.url
+      })
+    })
+
+    const response: Response = await request(app).get('/welcome/admin?foo=bar')
+
+    expect(response.status).toBe(500)
+    expect(response.body).toEqual({
+      message: 'scoped failure',
+      path: '/welcome/admin',
+      query: { foo: 'bar' },
+      url: '/welcome/admin?foo=bar'
+    })
   })
 })

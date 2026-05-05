@@ -757,24 +757,24 @@ class Hyperin {
         const relativePath = rawPath.slice(prefix.length) || '/'
         const relativeQuery =
           queryStart === -1 ? null : originalUrl.slice(queryStart + 1)
+        const restoreParsedTarget = (): void => {
+          request.setParsedTarget(rawPath, relativeQuery)
+        }
+
         request.setParsedTarget(relativePath, relativeQuery)
 
         const run = async (i: number): Promise<void> => {
           if (i >= allHandlers.length) {
-            request.setParsedTarget(
-              rawPath,
-              queryStart === -1 ? null : originalUrl.slice(queryStart + 1)
-            )
             return next()
           }
           await allHandlers[i]({ request, response, next: () => run(i + 1) })
         }
 
-        await run(0)
-        request.setParsedTarget(
-          rawPath,
-          queryStart === -1 ? null : originalUrl.slice(queryStart + 1)
-        )
+        try {
+          await run(0)
+        } finally {
+          restoreParsedTarget()
+        }
       }
 
       this.#router.use(scoped as Handler)
@@ -1092,16 +1092,24 @@ class Hyperin {
       if (finalized) return
       finalized = true
       socket._busy = false
+
       this.#activeRequests--
       if (this.#shuttingDown && this.#activeRequests <= this.#drainTarget) {
         this.#drainResolve?.()
       }
+
     }
     rawResponse.once('finish', finalizeRequest)
     rawResponse.once('close', finalizeRequest)
 
     const request = rawRequest as Request
     const response = rawResponse as Response
+
+    request.params ??= {} as Request['params']
+    request.files ??= {} as Request['files']
+    request.cookies ??= {}
+    request.signedCookies ??= {}
+    request.locals ??= {}
 
     rawRequest.once('aborted', () => {
       request.abort(new Error('Request aborted'))
@@ -1302,10 +1310,20 @@ class Hyperin {
 
     const timeout = options.timeout ?? 10_000
     this.#drainTarget = this.#requestContext.getStore() ? 1 : 0
+    let closePromise: Promise<void> | null = null
 
     // Step 1 — stop accepting new TCP connections
     if (this.#server?.listening) {
-      this.#server.close(() => undefined)
+      closePromise = new Promise<void>((resolve, reject) => {
+        this.#server?.close((error?: Error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+
+          resolve()
+        })
+      })
     }
 
     // Step 2 — destroy sockets that are idle (no request in flight).
@@ -1351,6 +1369,10 @@ class Hyperin {
       await options.onTimeout()
     } else if (options.onShutdown) {
       await options.onShutdown()
+    }
+
+    if (closePromise) {
+      await closePromise
     }
   }
 
@@ -1561,7 +1583,10 @@ export function hyperin(): Application {
     all: createRouteMethod('all'),
     route: core.route.bind(core),
     shutdown: core.shutdown.bind(core),
-    graceful: core.graceful.bind(core),
+    graceful: (options: ShutdownOptions = {}) => {
+      core.graceful(options)
+      return app
+    },
     gracefulExit: core.gracefulExit.bind(core),
     handler: core.handler
   }) as Application

@@ -132,4 +132,36 @@ describe('compress middleware', () => {
     expect(response.headers['content-encoding']).toBeUndefined()
     expect(response.body).toEqual(Buffer.concat([payload, payload, payload, payload]))
   })
+
+  test('supports response.write callback overload while compressing', async () => {
+    const app = hyperin()
+
+    app.use(compress({ encodings: ['gzip'], threshold: 1 }))
+    app.get('/stream-callback', async ({ response }) => {
+      response.type('text/plain; charset=utf-8')
+
+      await new Promise<void>((resolve, reject) => {
+        response.write('hello', (error?: Error | null) => {
+          if (error) {
+            reject(error)
+            return
+          }
+
+          resolve()
+        })
+      })
+
+      response.end(' world')
+    })
+
+    const response = await request(app)
+      .get('/stream-callback')
+      .set('Accept-Encoding', 'gzip')
+      .buffer(true)
+      .parse(bufferParser)
+
+    expect(response.status).toBe(200)
+    expect(response.headers['content-encoding']).toBe('gzip')
+    expect(response.body.toString('utf8')).toBe('hello world')
+  })
 })

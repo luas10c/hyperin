@@ -28,6 +28,14 @@ describe('Request', () => {
     expect(({} as Record<string, unknown>).x).toBeUndefined()
   })
 
+  test('preserves repeated query keys as arrays', () => {
+    const request = createRequest('/search?tag=a&tag=b&tag=c')
+
+    request.setParsedTarget('/search', 'tag=a&tag=b&tag=c')
+
+    expect(request.query).toEqual({ tag: ['a', 'b', 'c'] })
+  })
+
   test('recomputes path and query when parsed target changes', () => {
     const request = createRequest('/users?foo=bar')
 

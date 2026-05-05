@@ -191,6 +191,30 @@ function toBuffer(chunk: Buffer | string, encoding?: BufferEncoding): Buffer {
   return encoding ? Buffer.from(chunk, encoding) : Buffer.from(chunk)
 }
 
+function normalizeWriteArgs(
+  chunk: Buffer | string,
+  encoding?: BufferEncoding | ((error?: Error | null) => void),
+  cb?: (error?: Error | null) => void
+): {
+  chunk: Buffer | string
+  encoding: BufferEncoding | undefined
+  cb: ((error?: Error | null) => void) | undefined
+} {
+  if (typeof encoding === 'function') {
+    return {
+      chunk,
+      encoding: undefined,
+      cb: encoding
+    }
+  }
+
+  return {
+    chunk,
+    encoding,
+    cb
+  }
+}
+
 function normalizeContentTypeHeader(
   contentType: number | string | string[] | readonly string[] | undefined
 ): string | undefined {
@@ -311,16 +335,21 @@ export function compress(options: CompressOptions = {}): Middleware {
       encoding?: BufferEncoding,
       cb?: (error?: Error | null) => void
     ) => {
+      const normalized = normalizeWriteArgs(chunk, encoding, cb)
+
       if (passthrough) {
-        if (encoding) return originalWrite(chunk, encoding, cb)
-        return originalWrite(chunk, cb)
+        if (normalized.encoding)
+          return originalWrite(normalized.chunk, normalized.encoding, normalized.cb)
+        return normalized.cb
+          ? originalWrite(normalized.chunk, normalized.cb)
+          : originalWrite(normalized.chunk)
       }
 
-      const buffer = toBuffer(chunk, encoding)
+      const buffer = toBuffer(normalized.chunk, normalized.encoding)
 
       if (compressionStream) {
         const wrote = compressionStream.write(buffer)
-        if (cb) cb()
+        if (normalized.cb) normalized.cb()
         return wrote
       }
 
@@ -330,13 +359,13 @@ export function compress(options: CompressOptions = {}): Middleware {
       if (bufferedLength > maxBufferSize) {
         passthrough = true
         flushBufferedPassthrough()
-        if (cb) cb()
+        if (normalized.cb) normalized.cb()
         return true
       }
 
       if (shouldCompress(false)) {
         startCompression()
-        if (cb) cb()
+        if (normalized.cb) normalized.cb()
         return true
       }
 
@@ -345,7 +374,7 @@ export function compress(options: CompressOptions = {}): Middleware {
         flushBufferedPassthrough()
       }
 
-      if (cb) cb()
+      if (normalized.cb) normalized.cb()
       return true
     }) as typeof response.write
 

@@ -75,14 +75,6 @@ function createDecoder(
   return createBrotliDecompress()
 }
 
-export function decompressStream(
-  req: Request
-): Request | Gunzip | Inflate | BrotliDecompress {
-  const encoding = getContentEncoding(req)
-  if (encoding === 'identity') return req
-  return req.pipe(createDecoder(encoding))
-}
-
 async function decodeCompressedBuffer(
   payload: Buffer,
   encoding: 'gzip' | 'deflate' | 'br',
