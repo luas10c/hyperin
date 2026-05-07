@@ -5,6 +5,7 @@ import { Duplex } from 'node:stream'
 import request, { type Response } from 'supertest'
 
 import hyperin, { hyperin as createInstance } from '#/instance'
+import { json } from '#/middleware'
 
 type ErrorResponse = {
   statusCode?: number
@@ -52,6 +53,47 @@ describe('Instance integration', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers['x-powered-by']).toBeUndefined()
+  })
+
+  test('supports app.fetch for Web Request handlers', async () => {
+    const app = createInstance()
+
+    app.get('/hello', ({ request, response }) => {
+      return response.status(201).json({
+        runtime: request.get('x-runtime'),
+        host: request.get('host')
+      })
+    })
+
+    const response = await app.fetch(
+      new Request('https://example.com/hello', {
+        headers: { 'x-runtime': 'fetch' }
+      })
+    )
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toEqual({
+      runtime: 'fetch',
+      host: 'example.com'
+    })
+  })
+
+  test('supports app.fetch with json body parsing', async () => {
+    const app = createInstance()
+
+    app.use(json())
+    app.post('/users', ({ request }) => request.body as Record<string, unknown>)
+
+    const response = await app.fetch(
+      new Request('https://example.com/users', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Ada' })
+      })
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ name: 'Ada' })
   })
 
   test('executes global middlewares before the route', async () => {
