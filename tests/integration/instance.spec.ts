@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
-import { Agent, request as sendHttpRequest } from 'node:http'
+import { Agent, IncomingMessage, ServerResponse, request as sendHttpRequest } from 'node:http'
 import type { Socket } from 'node:net'
 import { Duplex } from 'node:stream'
 import request, { type Response } from 'supertest'
 
 import hyperin, { hyperin as createInstance } from '#/instance'
-import { Request as HyperinRequest } from '#/request'
-import { Response as HyperinResponse } from '#/response'
 
 type ErrorResponse = {
   statusCode?: number
@@ -141,7 +139,7 @@ describe('Instance integration', () => {
     })
   })
 
-  test('handler initializes request extension fields on plain incoming messages', async () => {
+  test('handler initializes request and response helpers on plain node:http objects', async () => {
     const app = createInstance()
     const socket = new Duplex({
       read() {},
@@ -149,7 +147,8 @@ describe('Instance integration', () => {
         callback()
       }
     })
-    const rawRequest = new HyperinRequest(socket as unknown as Socket)
+    const rawRequest = new IncomingMessage(socket as unknown as Socket)
+    const rawResponse = new ServerResponse(rawRequest)
 
     rawRequest.url = '/health'
     rawRequest.method = 'GET'
@@ -168,9 +167,28 @@ describe('Instance integration', () => {
       signedCookies: request.signedCookies
     }))
 
-    await expect(
-      app.handler(rawRequest, new HyperinResponse(rawRequest))
-    ).resolves.toBeUndefined()
+    const end = jest
+      .fn<(chunk?: string | Buffer) => ServerResponse>()
+      .mockReturnValue(rawResponse)
+    rawResponse.end = end as typeof rawResponse.end
+
+    await expect(app.handler(rawRequest, rawResponse)).resolves.toBeUndefined()
+
+    const payload = JSON.parse(end.mock.calls[0][0] as string) as Record<
+      string,
+      unknown
+    >
+
+    expect(payload).toMatchObject({
+      params: {},
+      files: {},
+      cookies: {},
+      signedCookies: {}
+    })
+    expect(payload.locals).toEqual(expect.any(Object))
+    expect(rawResponse.getHeader('Content-Type')).toBe(
+      'application/json; charset=utf-8'
+    )
   })
 
   test('exposes forwarded ip only when trust proxy is enabled in app flow', async () => {

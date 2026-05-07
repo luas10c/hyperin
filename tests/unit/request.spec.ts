@@ -1,7 +1,8 @@
+import { IncomingMessage } from 'node:http'
 import { describe, expect, test } from '@jest/globals'
 import { Socket } from 'node:net'
 
-import { Request } from '#/request'
+import { enhanceRequest, Request } from '#/request'
 
 function createRequest(url = '/'): Request {
   const request = new Request(new Socket())
@@ -63,5 +64,20 @@ describe('Request', () => {
     request.locals.trustedClientIp = '198.51.100.1'
 
     expect(request.ipAddress).toBe('198.51.100.1')
+  })
+
+  test('enhanceRequest decorates plain IncomingMessage instances', () => {
+    const request = new IncomingMessage(new Socket())
+
+    request.url = '/posts?tag=node&tag=bun'
+    request.headers.host = 'example.com'
+
+    const enhanced = enhanceRequest(request)
+
+    expect(enhanced).toBe(request)
+    expect(enhanced).toBeInstanceOf(Request)
+    expect(enhanced.path).toBe('/posts')
+    expect(enhanced.query).toEqual({ tag: ['node', 'bun'] })
+    expect(enhanced.locals).toEqual({})
   })
 })

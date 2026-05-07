@@ -49,6 +49,16 @@ export interface CookieOptions {
 
 type CookieTuple = [name: string, value: string, options?: CookieOptions]
 
+type ResponseState = {
+  sent: boolean
+}
+
+const RESPONSE_STATE = Symbol('hyperin.response.state')
+
+type ResponseInternals = ServerResponse & {
+  [RESPONSE_STATE]?: ResponseState
+}
+
 function appendHeaderValue(
   current: number | string | string[] | readonly string[] | undefined,
   value: string
@@ -71,6 +81,38 @@ function hasInvalidCookieChars(value: string): boolean {
   }
 
   return false
+}
+
+function byteLength(value: string): number {
+  if (value.length > 256) return Buffer.byteLength(value, 'utf8')
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) > 127) return Buffer.byteLength(value, 'utf8')
+  }
+  return value.length
+}
+
+function endWithStringBody(
+  response: Response,
+  contentType: string,
+  value: string
+): Response {
+  response.setHeader('Content-Type', contentType)
+  response.setHeader('Content-Length', byteLength(value))
+  response.end(value)
+  markResponseSent(response)
+  return response
+}
+
+function endWithBufferBody(
+  response: Response,
+  contentType: string,
+  value: Buffer
+): Response {
+  response.setHeader('Content-Type', contentType)
+  response.setHeader('Content-Length', value.length)
+  response.end(value)
+  markResponseSent(response)
+  return response
 }
 
 function normalizeSameSite(
@@ -116,14 +158,13 @@ function validateCookieOptions(options: CookieOptions): {
 }
 
 export class Response extends ServerResponse<Request> {
-  #sent = false
-
   constructor(request: Request) {
     super(request)
+    initializeResponse(this)
   }
 
   get sent(): boolean {
-    return this.#sent || this.writableEnded
+    return getResponseState(this).sent || this.writableEnded
   }
 
   get contentLength(): number {
@@ -133,47 +174,23 @@ export class Response extends ServerResponse<Request> {
     return 0
   }
 
-  /** Calculates byte length, avoiding Buffer.byteLength when only ASCII data is present. */
-  #byteLength(str: string): number {
-    if (str.length > 256) return Buffer.byteLength(str, 'utf8')
-    for (let i = 0; i < str.length; i++) {
-      if (str.charCodeAt(i) > 127) return Buffer.byteLength(str, 'utf8')
-    }
-    return str.length
-  }
-
-  #endWithStringBody(contentType: string, value: string): this {
-    this.setHeader('Content-Type', contentType)
-    this.setHeader('Content-Length', this.#byteLength(value))
-    this.end(value)
-    this.#sent = true
-    return this
-  }
-
-  #endWithBufferBody(contentType: string, value: Buffer): this {
-    this.setHeader('Content-Type', contentType)
-    this.setHeader('Content-Length', value.length)
-    this.end(value)
-    this.#sent = true
-    return this
-  }
-
   json<T extends object>(obj: T): this {
     if (this.sent) return this
-    return this.#endWithStringBody(
+    return endWithStringBody(
+      this,
       'application/json; charset=utf-8',
       JSON.stringify(obj)
-    )
+    ) as this
   }
 
   text(value: string): this {
     if (this.sent) return this
-    return this.#endWithStringBody('text/plain; charset=utf-8', value)
+    return endWithStringBody(this, 'text/plain; charset=utf-8', value) as this
   }
 
   html(value: string): this {
     if (this.sent) return this
-    return this.#endWithStringBody('text/html; charset=utf-8', value)
+    return endWithStringBody(this, 'text/html; charset=utf-8', value) as this
   }
 
   send(body?: string | object | Buffer): this {
@@ -181,12 +198,12 @@ export class Response extends ServerResponse<Request> {
 
     if (body === undefined || body === null) {
       this.end()
-      this.#sent = true
+      markResponseSent(this)
       return this
     }
 
     if (Buffer.isBuffer(body)) {
-      return this.#endWithBufferBody('application/octet-stream', body)
+      return endWithBufferBody(this, 'application/octet-stream', body) as this
     }
 
     if (typeof body === 'object') {
@@ -200,7 +217,7 @@ export class Response extends ServerResponse<Request> {
     this.setHeader('Location', url)
     this.statusCode = statusCode
     this.end()
-    this.#sent = true
+    markResponseSent(this)
     return this
   }
 
@@ -261,4 +278,39 @@ export class Response extends ServerResponse<Request> {
       maxAge: 0
     })
   }
+}
+
+function ensureResponseState(response: ResponseInternals): ResponseState {
+  if (response[RESPONSE_STATE]) return response[RESPONSE_STATE]
+
+  const state: ResponseState = { sent: false }
+  Object.defineProperty(response, RESPONSE_STATE, {
+    value: state,
+    configurable: false,
+    enumerable: false,
+    writable: false
+  })
+
+  return state
+}
+
+function initializeResponse(response: ServerResponse): void {
+  ensureResponseState(response as ResponseInternals)
+}
+
+function getResponseState(response: ServerResponse): ResponseState {
+  return ensureResponseState(response as ResponseInternals)
+}
+
+function markResponseSent(response: ServerResponse): void {
+  getResponseState(response).sent = true
+}
+
+export function enhanceResponse(rawResponse: ServerResponse): Response {
+  if (Object.getPrototypeOf(rawResponse) !== Response.prototype) {
+    Object.setPrototypeOf(rawResponse, Response.prototype)
+  }
+
+  initializeResponse(rawResponse)
+  return rawResponse as Response
 }

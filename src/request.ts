@@ -14,6 +14,21 @@ export type RequestBody =
   | string
   | undefined
 
+type RequestState = {
+  parsedUrl: URL | null
+  path: string | null
+  query: RequestQuery | null
+  rawQuery: string | null
+  targetOverridden: boolean
+  abortController: AbortController
+}
+
+const REQUEST_STATE = Symbol('hyperin.request.state')
+
+type RequestInternals = IncomingMessage & {
+  [REQUEST_STATE]?: RequestState
+}
+
 function isUnsafePropertyKey(key: string): boolean {
   return key === '__proto__' || key === 'constructor' || key === 'prototype'
 }
@@ -29,23 +44,17 @@ export class Request<
   TFiles extends RequestFiles = RequestFiles
 > extends IncomingMessage {
   /** Parsed route params e.g. /users/:id → req.params.id */
-  params = {} as TParams
+  declare params: TParams
   /** Parsed body (requires json middleware) */
-  body = undefined as TBody
+  declare body: TBody
   /** Uploaded files (requires multipart middleware) */
-  files = {} as TFiles
+  declare files: TFiles
   /** Parsed cookies (requires cookies middleware) */
-  cookies: Record<string, string> = {}
+  declare cookies: Record<string, string>
   /** Parsed and verified signed cookies (requires cookies middleware) */
-  signedCookies: Record<string, string> = {}
+  declare signedCookies: Record<string, string>
   /** Custom state bag for middleware communication */
-  locals: Record<string, unknown> = {}
-
-  #parsedUrl: URL | null = null
-  #path: string | null = null
-  #query: TQuery | null = null
-  #rawQuery: string | null = null
-  #abortController = new AbortController()
+  declare locals: Record<string, unknown>
 
   static #extractPathname(rawUrl: string): string {
     if (!rawUrl) return '/'
@@ -125,62 +134,79 @@ export class Request<
 
   constructor(socket: Socket) {
     super(socket)
+    initializeRequest(this)
   }
 
   get parsedUrl(): URL {
-    if (!this.#parsedUrl) {
-      this.#parsedUrl = new URL(
+    const state = getRequestState(this)
+    if (!state.parsedUrl) {
+      state.parsedUrl = new URL(
         this.url || '/',
         `http://${this.headers.host || 'localhost'}`
       )
     }
-    return this.#parsedUrl
+    return state.parsedUrl
   }
 
   get signal(): AbortSignal {
-    return this.#abortController.signal
+    return getRequestState(this).abortController.signal
   }
 
   abort(reason?: unknown): void {
-    if (!this.#abortController.signal.aborted) {
-      this.#abortController.abort(reason)
+    const state = getRequestState(this)
+    if (!state.abortController.signal.aborted) {
+      state.abortController.abort(reason)
     }
   }
 
   get query(): TQuery {
-    if (this.#query === null) {
-      this.#query = (
-        this.#rawQuery ? Request.#parseQueryString(this.#rawQuery) : {}
+    const state = getRequestState(this)
+    if (state.query === null) {
+      if (state.rawQuery === null && !state.targetOverridden) {
+        const queryStart = (this.url || '/').indexOf('?')
+        state.rawQuery =
+          queryStart === -1 ? null : (this.url || '/').slice(queryStart + 1)
+      }
+
+      state.query = (
+        state.rawQuery ? Request.#parseQueryString(state.rawQuery) : {}
       ) as TQuery
     }
 
-    return this.#query
+    return state.query as TQuery
   }
 
   set query(value: TQuery) {
-    this.#query = value
-    this.#rawQuery = null
+    const state = getRequestState(this)
+    state.query = value
+    state.rawQuery = null
+    state.targetOverridden = true
   }
 
   setParsedTarget(path: string | null, rawQuery: string | null): void {
-    this.#path = path
-    this.#query = null
-    this.#rawQuery = rawQuery
+    const state = getRequestState(this)
+    state.path = path
+    state.query = null
+    state.rawQuery = rawQuery
+    state.targetOverridden = true
   }
 
   resetParsedUrl(): void {
-    this.#parsedUrl = null
-    this.#path = null
-    this.#query = null
-    this.#rawQuery = null
+    const state = getRequestState(this)
+    state.parsedUrl = null
+    state.path = null
+    state.query = null
+    state.rawQuery = null
+    state.targetOverridden = false
   }
 
   get path(): string {
-    if (this.#path === null) {
-      this.#path = Request.#extractPathname(this.url || '/')
+    const state = getRequestState(this)
+    if (state.path === null) {
+      state.path = Request.#extractPathname(this.url || '/')
     }
 
-    return this.#path
+    return state.path
   }
 
   get ipAddress(): string {
@@ -201,4 +227,50 @@ export class Request<
     const contentType = this.headers['content-type'] || ''
     return contentType.includes(type)
   }
+}
+
+function ensureRequestState(request: RequestInternals): RequestState {
+  if (request[REQUEST_STATE]) return request[REQUEST_STATE]
+
+  const state: RequestState = {
+    parsedUrl: null,
+    path: null,
+    query: null,
+    rawQuery: null,
+    targetOverridden: false,
+    abortController: new AbortController()
+  }
+
+  Object.defineProperty(request, REQUEST_STATE, {
+    value: state,
+    configurable: false,
+    enumerable: false,
+    writable: false
+  })
+
+  return state
+}
+
+function initializeRequest(request: IncomingMessage): void {
+  const enhancedRequest = request as Request
+  ensureRequestState(request as RequestInternals)
+  enhancedRequest.params ??= {} as Request['params']
+  enhancedRequest.body ??= undefined as Request['body']
+  enhancedRequest.files ??= {} as Request['files']
+  enhancedRequest.cookies ??= {}
+  enhancedRequest.signedCookies ??= {}
+  enhancedRequest.locals ??= {}
+}
+
+function getRequestState(request: IncomingMessage): RequestState {
+  return ensureRequestState(request as RequestInternals)
+}
+
+export function enhanceRequest(rawRequest: IncomingMessage): Request {
+  if (Object.getPrototypeOf(rawRequest) !== Request.prototype) {
+    Object.setPrototypeOf(rawRequest, Request.prototype)
+  }
+
+  initializeRequest(rawRequest)
+  return rawRequest as Request
 }

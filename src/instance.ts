@@ -7,8 +7,8 @@ import {
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Socket } from 'node:net'
 
-import { Request } from './request'
-import { Response } from './response'
+import { enhanceRequest, Request } from './request'
+import { enhanceResponse, Response } from './response'
 import { errorMiddleware, RadixRouter } from './router'
 import { validate } from './validation'
 import {
@@ -1101,14 +1101,8 @@ class Hyperin {
     rawResponse.once('finish', finalizeRequest)
     rawResponse.once('close', finalizeRequest)
 
-    const request = rawRequest as Request
-    const response = rawResponse as Response
-
-    request.params ??= {} as Request['params']
-    request.files ??= {} as Request['files']
-    request.cookies ??= {}
-    request.signedCookies ??= {}
-    request.locals ??= {}
+    const request = enhanceRequest(rawRequest)
+    const response = enhanceResponse(rawResponse)
 
     rawRequest.once('aborted', () => {
       request.abort(new Error('Request aborted'))
@@ -1277,12 +1271,7 @@ class Hyperin {
   // ──────────────────────────────────────────────
 
   listen(port: number, hostname?: string, callback?: () => void): Server {
-    const server = this.#bindServer(
-      createServer({
-        IncomingMessage: Request,
-        ServerResponse: Response
-      })
-    )
+    const server = this.#bindServer(createServer())
 
     const cb = callback || (() => {})
     if (hostname) {
@@ -1510,14 +1499,10 @@ type RouteMethodName =
 export function hyperin(): Application {
   const core = new Hyperin()
 
-  // Create the http.Server immediately with the custom classes.
-  // This is necessary so that supertest(app) receives a real Server
-  // and uses the proper Request/Response implementations, instead of
-  // creating a generic http.createServer internally.
-  const server = createServer({
-    IncomingMessage: Request,
-    ServerResponse: Response
-  })
+  // Create the http.Server immediately so supertest(app) receives a real
+  // Server instance. Request and response objects are enhanced during
+  // dispatch, which keeps the runtime compatible with Bun's node:http shim.
+  const server = createServer()
   core.attachServer(server)
 
   function use(handler: AnyErrorHandler): void

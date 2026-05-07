@@ -1,8 +1,9 @@
+import { IncomingMessage, ServerResponse } from 'node:http'
 import { describe, expect, jest, test } from '@jest/globals'
 import { Socket } from 'node:net'
 
 import { Request } from '#/request'
-import { Response } from '#/response'
+import { enhanceResponse, Response } from '#/response'
 
 function createResponse() {
   const request = new Request(new Socket())
@@ -101,5 +102,26 @@ describe('Response', () => {
     expect(end).toHaveBeenCalledTimes(1)
     expect(end).toHaveBeenCalledWith('first')
     expect(response.getHeader('Content-Type')).toBe('text/plain; charset=utf-8')
+  })
+
+  test('enhanceResponse decorates plain ServerResponse instances', () => {
+    const request = new IncomingMessage(new Socket())
+    const rawResponse = new ServerResponse(request)
+    const end = jest
+      .fn<(chunk?: string | Buffer) => ServerResponse>()
+      .mockReturnValue(rawResponse)
+
+    rawResponse.end = end as typeof rawResponse.end
+
+    const response = enhanceResponse(rawResponse)
+    response.status(201).json({ ok: true })
+
+    expect(response).toBe(rawResponse)
+    expect(response).toBeInstanceOf(Response)
+    expect(response.sent).toBe(true)
+    expect(end).toHaveBeenCalledWith(JSON.stringify({ ok: true }))
+    expect(response.getHeader('Content-Type')).toBe(
+      'application/json; charset=utf-8'
+    )
   })
 })
