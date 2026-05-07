@@ -61,11 +61,22 @@ function canResponseHaveBody(request: Request, statusCode: number): boolean {
 function createNodeRequestFromWebRequest(webRequest: globalThis.Request): Request {
   const request = new Request(new Socket())
   const target = new URL(webRequest.url)
+  const socket = request.socket as Socket & {
+    encrypted?: boolean
+    _read?: (size?: number) => void
+  }
 
   request.method = webRequest.method
   request.url = `${target.pathname}${target.search}` || '/'
   request.headers = {}
   request.rawHeaders = []
+
+  Object.defineProperty(socket, 'encrypted', {
+    value: target.protocol === 'https:',
+    configurable: true,
+    enumerable: false,
+    writable: true
+  })
 
   const headers = request.headers
   for (const [key, value] of webRequest.headers) {
@@ -105,8 +116,20 @@ function createNodeRequestFromWebRequest(webRequest: globalThis.Request): Reques
 
   webRequest.signal.addEventListener('abort', abortRequest, { once: true })
 
+  socket._read = () => {
+    if (source.isPaused()) {
+      source.resume()
+    }
+  }
+
   source.on('data', (chunk: Buffer | string) => {
-    request.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    const accepted = request.push(
+      Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    )
+
+    if (!accepted) {
+      source.pause()
+    }
   })
   source.on('end', () => {
     webRequest.signal.removeEventListener('abort', abortRequest)

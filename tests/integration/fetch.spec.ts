@@ -6,6 +6,7 @@ import { gunzipSync } from 'node:zlib'
 
 import { hyperin } from '#/instance'
 import { compress, json, serveStatic } from '#/middleware'
+import { security } from '#/middleware/security'
 
 function getSetCookieHeaders(response: globalThis.Response): string[] {
   const headers = response.headers as Headers & {
@@ -148,5 +149,19 @@ describe('fetch adapter integration', () => {
     expect(etag).toBeTruthy()
     expect(second.status).toBe(304)
     await expect(second.text()).resolves.toBe('')
+  })
+
+  test('treats https fetch requests as secure for HSTS', async () => {
+    const app = hyperin()
+
+    app.use(security())
+    app.get('/secure', () => 'ok')
+
+    const response = await app.fetch(new Request('https://example.com/secure'))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('strict-transport-security')).toBe(
+      'max-age=15552000; includeSubDomains'
+    )
   })
 })
