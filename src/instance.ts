@@ -5,10 +5,9 @@ import {
   ServerResponse
 } from 'node:http'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { Socket } from 'node:net'
-import { Readable } from 'node:stream'
-import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
+import type { Socket } from 'node:net'
 
+import { createFetchHandler } from './adapters/fetch'
 import { enhanceRequest, Request } from './request'
 import { enhanceResponse, Response } from './response'
 import { errorMiddleware, RadixRouter } from './router'
@@ -636,210 +635,6 @@ function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
     typeof value === 'object' &&
     typeof (value as { then?: unknown }).then === 'function'
   )
-}
-
-function appendHeader(
-  headers: IncomingMessage['headers'],
-  key: string,
-  value: string
-): void {
-  const current = headers[key]
-
-  if (current === undefined) {
-    headers[key] = value
-    return
-  }
-
-  if (Array.isArray(current)) {
-    current.push(value)
-    return
-  }
-
-  headers[key] = [current, value]
-}
-
-function createNodeRequestFromWebRequest(webRequest: globalThis.Request): Request {
-  const request = new Request(new Socket())
-  const target = new URL(webRequest.url)
-  request.method = webRequest.method
-  request.url = webRequest.url
-  request.headers = {}
-  request.rawHeaders = []
-
-  const headers = request.headers
-  for (const [key, value] of webRequest.headers) {
-    request.rawHeaders.push(key, value)
-    appendHeader(headers, key.toLowerCase(), value)
-  }
-
-  if (!headers.host) {
-    headers.host = target.host
-    request.rawHeaders.push('host', target.host)
-  }
-
-  if (webRequest.body && !headers['content-length']) {
-    headers['transfer-encoding'] = 'chunked'
-  }
-
-  if (!webRequest.body) {
-    queueMicrotask(() => {
-      request.push(null)
-    })
-    return request
-  }
-
-  const source = Readable.fromWeb(
-    webRequest.body as unknown as NodeReadableStream
-  )
-  const abortRequest = () => {
-    request.emit('aborted')
-    source.destroy(Object.assign(new Error('Request aborted'), { status: 400 }))
-    request.destroy(Object.assign(new Error('Request aborted'), { status: 400 }))
-  }
-
-  if (webRequest.signal.aborted) {
-    queueMicrotask(abortRequest)
-    return request
-  }
-
-  webRequest.signal.addEventListener('abort', abortRequest, { once: true })
-
-  source.on('data', (chunk: Buffer | string) => {
-    request.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  })
-  source.on('end', () => {
-    webRequest.signal.removeEventListener('abort', abortRequest)
-    request.push(null)
-  })
-  source.on('error', (error: Error) => {
-    webRequest.signal.removeEventListener('abort', abortRequest)
-    request.destroy(error)
-  })
-
-  return request
-}
-
-function normalizeBodyChunk(
-  chunk?: Buffer | Uint8Array | string | null,
-  encoding?: BufferEncoding
-): Buffer | null {
-  if (chunk == null) return null
-  if (Buffer.isBuffer(chunk)) return chunk
-  if (chunk instanceof Uint8Array) return Buffer.from(chunk)
-  return Buffer.from(chunk, encoding)
-}
-
-function createWebResponseBridge(
-  request: Request
-): {
-  response: Response
-  completed: Promise<globalThis.Response>
-} {
-  const response = new Response(request)
-  const chunks: Buffer[] = []
-  let ended = false
-  let resolved = false
-
-  Object.defineProperty(response, 'headersSent', {
-    configurable: true,
-    enumerable: true,
-    get() {
-      return ended || chunks.length > 0
-    }
-  })
-
-  Object.defineProperty(response, 'writableEnded', {
-    configurable: true,
-    enumerable: true,
-    get() {
-      return ended
-    }
-  })
-
-  const completed = new Promise<globalThis.Response>((resolve, reject) => {
-    const finish = () => {
-      if (resolved) return
-      resolved = true
-
-      const headers = new Headers()
-      for (const name of response.getHeaderNames()) {
-        const value = response.getHeader(name)
-        if (value === undefined) continue
-
-        if (Array.isArray(value)) {
-          for (const entry of value) headers.append(name, String(entry))
-          continue
-        }
-
-        headers.set(name, String(value))
-      }
-
-      const status = response.statusCode || 200
-      const body =
-        request.method === 'HEAD' || status === 204 || status === 205 || status === 304
-          ? null
-          : chunks.length > 0
-            ? Buffer.concat(chunks)
-            : null
-
-      resolve(new globalThis.Response(body, { status, headers }))
-    }
-
-    response.once('finish', finish)
-    response.once('close', finish)
-    response.once('error', reject)
-  })
-
-  response.write = ((
-    chunk: Buffer | string,
-    encoding?: BufferEncoding | ((error?: Error | null) => void),
-    cb?: (error?: Error | null) => void
-  ) => {
-    let resolvedEncoding: BufferEncoding | undefined
-    let callback: ((error?: Error | null) => void) | undefined
-
-    if (typeof encoding === 'function') {
-      callback = encoding
-    } else {
-      resolvedEncoding = encoding
-      callback = cb
-    }
-
-    const buffer = normalizeBodyChunk(chunk, resolvedEncoding)
-    if (buffer) chunks.push(buffer)
-    callback?.()
-    return true
-  }) as typeof response.write
-
-  response.end = ((
-    chunk?: Buffer | string | (() => void),
-    encoding?: BufferEncoding | (() => void),
-    cb?: () => void
-  ) => {
-    let bodyChunk: Buffer | string | undefined
-    let resolvedEncoding: BufferEncoding | undefined
-    let callback: (() => void) | undefined
-
-    if (typeof chunk === 'function') {
-      callback = chunk
-    } else if (typeof encoding === 'function') {
-      bodyChunk = chunk
-      callback = encoding
-    } else {
-      bodyChunk = chunk
-      resolvedEncoding = encoding
-      callback = cb
-    }
-
-    const buffer = normalizeBodyChunk(bodyChunk, resolvedEncoding)
-    if (buffer) chunks.push(buffer)
-    ended = true
-    callback?.()
-    response.emit('finish')
-    return response
-  }) as typeof response.end
-
-  return { response, completed }
 }
 
 function isRouteSchemaOptions(value: unknown): value is RouteSchemaOptions {
@@ -1746,15 +1541,7 @@ export function hyperin(): Application {
     return app
   }
 
-  async function fetch(
-    request: globalThis.Request
-  ): Promise<globalThis.Response> {
-    const nodeRequest = createNodeRequestFromWebRequest(request)
-    const { response, completed } = createWebResponseBridge(nodeRequest)
-
-    await core.handler(nodeRequest, response)
-    return await completed
-  }
+  const fetch = createFetchHandler(core.handler)
 
   // The app is the server itself — thus supertest(app) works directly.
   // Métodos de rota e middleware são adicionados via Object.assign.
