@@ -25,13 +25,26 @@ export type HandlerReturn =
   | void
   | undefined
   | string
+  | boolean
   | unknown[]
+  | readonly unknown[]
   | Record<string, unknown>
-  | Promise<void | undefined | string | unknown[] | Record<string, unknown>>
+  | Promise<
+      | void
+      | undefined
+      | string
+      | boolean
+      | unknown[]
+      | readonly unknown[]
+      | Record<string, unknown>
+    >
 
-export type HandlerContext<TRequest extends Request = Request> = {
+export type HandlerContext<
+  TRequest extends Request = Request,
+  TResponse extends object = Response
+> = {
   request: TRequest
-  response: Response
+  response: TResponse
   next: NextFunction
 }
 
@@ -39,8 +52,10 @@ export type Middleware = (
   ctx: HandlerContext & { next: NextFunction }
 ) => void | Promise<void>
 
-export type ErrorContext<TRequest extends Request = Request> =
-  HandlerContext<TRequest> & {
+export type ErrorContext<
+  TRequest extends Request = Request,
+  TResponse extends object = Response
+> = HandlerContext<TRequest, TResponse> & {
     error: Error
     next: NextFunction
   }
@@ -219,16 +234,20 @@ export interface RouteSchemaOptions {
 
 export interface TypedMiddleware<
   TRequest extends Request = Request,
-  TRefinement extends RequestRefinement = Record<never, never>
+  TRefinement extends RequestRefinement = Record<never, never>,
+  TResponse extends object = Response
 > {
-  (ctx: HandlerContext<TRequest>): HandlerReturn
+  (ctx: HandlerContext<TRequest, TResponse>): HandlerReturn
   readonly __validate__?: TRefinement
 }
 
 export type Handler<TRequest extends Request = Request> =
   TypedMiddleware<TRequest>
-export type ErrorMiddleware<TRequest extends Request = Request> = (
-  ctx: ErrorContext<TRequest>
+export type ErrorMiddleware<
+  TRequest extends Request = Request,
+  TResponse extends object = Response
+> = (
+  ctx: ErrorContext<TRequest, TResponse>
 ) => void | Promise<void>
 export type ErrorHandler<TRequest extends Request = Request> =
   ErrorMiddleware<TRequest>
@@ -258,7 +277,7 @@ type MergeRefinement<
 >
 
 export type ApplyMiddleware<TRequest extends Request, TMiddleware> =
-  TMiddleware extends TypedMiddleware<TRequest, infer TRefinement>
+  TMiddleware extends TypedMiddleware<TRequest, infer TRefinement, infer _TResponse>
     ? MergeRefinement<TRequest, TRefinement>
     : never
 
@@ -266,7 +285,11 @@ export type HandlerChain<
   TRequest extends Request,
   THandlers extends unknown[]
 > = THandlers extends [infer TFirst, ...infer TRest]
-  ? TFirst extends TypedMiddleware<TRequest, RequestRefinement>
+  ? TFirst extends TypedMiddleware<
+      TRequest,
+      RequestRefinement,
+      infer _TResponse
+    >
     ? [TFirst, ...HandlerChain<ApplyMiddleware<TRequest, TFirst>, TRest>]
     : never
   : []
@@ -330,6 +353,87 @@ export type ApplyRouteOptions<
     : TRequest['query'],
   TRequest['files']
 >
+
+type DeclaredResponseStatusCodes<
+  TResponses extends RouteSchemaOptions['responses']
+> = Extract<keyof NonNullable<TResponses>, number>
+
+export type ResponseStatusCodes<TOptions extends RouteSchemaOptions> =
+  [DeclaredResponseStatusCodes<TOptions['responses']>] extends [never]
+    ? number
+    : DeclaredResponseStatusCodes<TOptions['responses']>
+
+type ResponseEntryForStatus<
+  TResponses extends RouteSchemaOptions['responses'],
+  TStatus extends number
+> = NonNullable<TResponses> extends infer TDefinedResponses extends object
+  ? TStatus extends keyof TDefinedResponses
+    ? TDefinedResponses[TStatus]
+    : `${TStatus}` extends keyof TDefinedResponses
+      ? TDefinedResponses[`${TStatus}`]
+      : never
+  : never
+
+type NormalizeResponseContent<TEntry> = TEntry extends { content: infer TContent }
+  ? TContent extends string
+    ? Record<TContent, { schema: unknown }>
+    : TContent
+  : TEntry extends { schema: infer TSchema; contentType: infer TContentType extends string }
+    ? Record<TContentType, { schema: TSchema }>
+    : TEntry extends { schema: infer TSchema }
+      ? { 'application/json': { schema: TSchema } }
+      : never
+
+type ContentSchemaByPattern<
+  TResponses extends RouteSchemaOptions['responses'],
+  TStatus extends number,
+  TPattern extends string
+> = NormalizeResponseContent<
+  ResponseEntryForStatus<TResponses, TStatus>
+> extends infer TContent extends object
+  ? {
+      [TKey in keyof TContent]: TKey extends string
+        ? TKey extends TPattern
+          ? TContent[TKey] extends { schema: infer TSchema }
+            ? InferSchemaOutput<TSchema>
+            : never
+          : never
+        : never
+    }[keyof TContent]
+  : never
+
+type JsonBodyForResponse<
+  TResponses extends RouteSchemaOptions['responses'],
+  TStatus extends number
+> = TResponses extends undefined
+  ? object
+  : [ContentSchemaByPattern<TResponses, TStatus, `application/json${string}`>] extends [never]
+    ? never
+    : ContentSchemaByPattern<TResponses, TStatus, `application/json${string}`>
+
+type TextBodyForResponse<
+  TResponses extends RouteSchemaOptions['responses'],
+  TStatus extends number
+> = TResponses extends undefined
+  ? string
+  : [ContentSchemaByPattern<TResponses, TStatus, `text/plain${string}`>] extends [never]
+    ? never
+    : ContentSchemaByPattern<TResponses, TStatus, `text/plain${string}`>
+
+export type TypedResponse<
+  TResponses extends RouteSchemaOptions['responses'] = undefined,
+  TStatusCode extends number = 200
+> = Omit<Response, 'status' | 'json' | 'text'> & {
+  status<TNextStatusCode extends ResponseStatusCodes<{ responses: TResponses }>>(
+    statusCode: TNextStatusCode
+  ): TypedResponse<TResponses, TNextStatusCode>
+  json(body: JsonBodyForResponse<TResponses, TStatusCode>): TypedResponse<TResponses, TStatusCode>
+  text(body: TextBodyForResponse<TResponses, TStatusCode>): TypedResponse<TResponses, TStatusCode>
+}
+
+export type ApplyRouteResponse<
+  TOptions extends RouteSchemaOptions
+> = TypedResponse<TOptions['responses']>
 
 export type RouteHandlerArgs<
   TPath extends string,

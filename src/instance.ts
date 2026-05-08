@@ -27,6 +27,7 @@ import {
 import type {
   ApplyMiddleware,
   ApplyRouteOptions,
+  ApplyRouteResponse,
   AnyErrorHandler,
   AnyHandler,
   AnyMiddleware,
@@ -129,10 +130,10 @@ type RouteObserver = (
 ) => void
 type MiddlewareObserver = (middleware: Handler) => void
 
-type RouteMiddleware<TRequest extends Request> = TypedMiddleware<
-  TRequest,
-  RequestRefinement
->
+type RouteMiddleware<
+  TRequest extends Request,
+  TResponse extends object = Response
+> = TypedMiddleware<TRequest, RequestRefinement, TResponse>
 
 type RouteStep1<TPath extends string> = RouteMiddleware<RouteRequest<TPath>>
 type RouteStep2<
@@ -145,6 +146,72 @@ type RouteStep3<
   T2 extends RouteStep2<TPath, T1>
 > = RouteMiddleware<
   ApplyMiddleware<ApplyMiddleware<RouteRequest<TPath>, T1>, T2>
+>
+
+type RouteOptionResponse<TOptions extends RouteSchemaOptions> =
+  ApplyRouteResponse<TOptions>
+type RouteOptionStep1<
+  TPath extends string,
+  TOptions extends RouteSchemaOptions
+> = RouteMiddleware<
+  ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
+  RouteOptionResponse<TOptions>
+>
+type RouteOptionStep2<
+  TPath extends string,
+  TOptions extends RouteSchemaOptions,
+  T1 extends RouteOptionStep1<TPath, TOptions>
+> = RouteMiddleware<
+  ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+  RouteOptionResponse<TOptions>
+>
+type RouteOptionStep3<
+  TPath extends string,
+  TOptions extends RouteSchemaOptions,
+  T1 extends RouteOptionStep1<TPath, TOptions>,
+  T2 extends RouteOptionStep2<TPath, TOptions, T1>
+> = RouteMiddleware<
+  ApplyMiddleware<
+    ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+    T2
+  >,
+  RouteOptionResponse<TOptions>
+>
+type RouteOptionStep4<
+  TPath extends string,
+  TOptions extends RouteSchemaOptions,
+  T1 extends RouteOptionStep1<TPath, TOptions>,
+  T2 extends RouteOptionStep2<TPath, TOptions, T1>,
+  T3 extends RouteOptionStep3<TPath, TOptions, T1, T2>
+> = RouteMiddleware<
+  ApplyMiddleware<
+    ApplyMiddleware<
+      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+      T2
+    >,
+    T3
+  >,
+  RouteOptionResponse<TOptions>
+>
+type RouteOptionStep5<
+  TPath extends string,
+  TOptions extends RouteSchemaOptions,
+  T1 extends RouteOptionStep1<TPath, TOptions>,
+  T2 extends RouteOptionStep2<TPath, TOptions, T1>,
+  T3 extends RouteOptionStep3<TPath, TOptions, T1, T2>,
+  T4 extends RouteOptionStep4<TPath, TOptions, T1, T2, T3>
+> = RouteMiddleware<
+  ApplyMiddleware<
+    ApplyMiddleware<
+      ApplyMiddleware<
+        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
+        T2
+      >,
+      T3
+    >,
+    T4
+  >,
+  RouteOptionResponse<TOptions>
 >
 type RouteStep4<
   TPath extends string,
@@ -262,142 +329,86 @@ interface RouteMethod<TSelf> {
       RouteStep5<TPath, T1, T2, T3, T4>
     ]
   ): TSelf
-  <const TPath extends string, TOptions extends RouteSchemaOptions>(
+  <const TPath extends string, const TOptions extends RouteSchemaOptions>(
     path: TPath,
-    ...handlers: [
-      handler: RouteMiddleware<
-        ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-      >,
-      options: TOptions & RouteSchemaOptions
-    ]
+    ...handlers: [handler: RouteOptionStep1<TPath, TOptions>, options: TOptions]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>
   >(
     path: TPath,
     ...handlers: [
       handler: T1,
-      handler: RouteMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-      >,
-      options: TOptions & RouteSchemaOptions
+      handler: RouteOptionStep2<TPath, TOptions, T1>,
+      options: TOptions
     ]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>
   >(
     path: TPath,
     ...handlers: [
       ...Handler[],
       T1,
-      RouteMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-      >,
-      TOptions & RouteSchemaOptions
+      RouteOptionStep2<TPath, TOptions, T1>,
+      TOptions
     ]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>,
+    T2 extends RouteOptionStep2<TPath, TOptions, T1>
   >(
     path: TPath,
     ...handlers: [
       handler: T1,
       handler: T2,
-      handler: RouteMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-          T2
-        >
-      >,
-      options: TOptions & RouteSchemaOptions
+      handler: RouteOptionStep3<TPath, TOptions, T1, T2>,
+      options: TOptions
     ]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>,
+    T2 extends RouteOptionStep2<TPath, TOptions, T1>
   >(
     path: TPath,
     ...handlers: [
       ...Handler[],
       T1,
       T2,
-      RouteMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-          T2
-        >
-      >,
-      TOptions & RouteSchemaOptions
+      RouteOptionStep3<TPath, TOptions, T1, T2>,
+      TOptions
     ]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-        T2
-      >
-    >
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>,
+    T2 extends RouteOptionStep2<TPath, TOptions, T1>,
+    T3 extends RouteOptionStep3<TPath, TOptions, T1, T2>
   >(
     path: TPath,
     ...handlers: [
       handler: T1,
       handler: T2,
       handler: T3,
-      handler: RouteMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<
-            ApplyMiddleware<
-              ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
-              T1
-            >,
-            T2
-          >,
-          T3
-        >
-      >,
-      options: TOptions & RouteSchemaOptions
+      handler: RouteOptionStep4<TPath, TOptions, T1, T2, T3>,
+      options: TOptions
     ]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-        T2
-      >
-    >
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>,
+    T2 extends RouteOptionStep2<TPath, TOptions, T1>,
+    T3 extends RouteOptionStep3<TPath, TOptions, T1, T2>
   >(
     path: TPath,
     ...handlers: [
@@ -405,45 +416,17 @@ interface RouteMethod<TSelf> {
       T1,
       T2,
       T3,
-      RouteMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<
-            ApplyMiddleware<
-              ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
-              T1
-            >,
-            T2
-          >,
-          T3
-        >
-      >,
-      TOptions & RouteSchemaOptions
+      RouteOptionStep4<TPath, TOptions, T1, T2, T3>,
+      TOptions
     ]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-        T2
-      >
-    >,
-    T4 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-          T2
-        >,
-        T3
-      >
-    >
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>,
+    T2 extends RouteOptionStep2<TPath, TOptions, T1>,
+    T3 extends RouteOptionStep3<TPath, TOptions, T1, T2>,
+    T4 extends RouteOptionStep4<TPath, TOptions, T1, T2, T3>
   >(
     path: TPath,
     ...handlers: [
@@ -451,48 +434,17 @@ interface RouteMethod<TSelf> {
       handler: T2,
       handler: T3,
       handler: T4,
-      handler: RouteMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<
-            ApplyMiddleware<
-              ApplyMiddleware<
-                ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
-                T1
-              >,
-              T2
-            >,
-            T3
-          >,
-          T4
-        >
-      >,
-      options: TOptions & RouteSchemaOptions
+      handler: RouteOptionStep5<TPath, TOptions, T1, T2, T3, T4>,
+      options: TOptions
     ]
   ): TSelf
   <
     const TPath extends string,
-    TOptions extends RouteSchemaOptions,
-    T1 extends RouteMiddleware<
-      ApplyRouteOptions<RouteRequest<TPath>, TOptions>
-    >,
-    T2 extends RouteMiddleware<
-      ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>
-    >,
-    T3 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-        T2
-      >
-    >,
-    T4 extends RouteMiddleware<
-      ApplyMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>, T1>,
-          T2
-        >,
-        T3
-      >
-    >
+    const TOptions extends RouteSchemaOptions,
+    T1 extends RouteOptionStep1<TPath, TOptions>,
+    T2 extends RouteOptionStep2<TPath, TOptions, T1>,
+    T3 extends RouteOptionStep3<TPath, TOptions, T1, T2>,
+    T4 extends RouteOptionStep4<TPath, TOptions, T1, T2, T3>
   >(
     path: TPath,
     ...handlers: [
@@ -501,31 +453,13 @@ interface RouteMethod<TSelf> {
       T2,
       T3,
       T4,
-      RouteMiddleware<
-        ApplyMiddleware<
-          ApplyMiddleware<
-            ApplyMiddleware<
-              ApplyMiddleware<
-                ApplyRouteOptions<RouteRequest<TPath>, TOptions>,
-                T1
-              >,
-              T2
-            >,
-            T3
-          >,
-          T4
-        >
-      >,
-      TOptions & RouteSchemaOptions
+      RouteOptionStep5<TPath, TOptions, T1, T2, T3, T4>,
+      TOptions
     ]
   ): TSelf
-  <const TPath extends string, TOptions extends RouteSchemaOptions>(
+  <const TPath extends string, const TOptions extends RouteSchemaOptions>(
     path: TPath,
-    ...handlers: [
-      ...Handler[],
-      RouteMiddleware<ApplyRouteOptions<RouteRequest<TPath>, TOptions>>,
-      TOptions & RouteSchemaOptions
-    ]
+    ...handlers: [...Handler[], RouteOptionStep1<TPath, TOptions>, TOptions]
   ): TSelf
 }
 
