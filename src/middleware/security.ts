@@ -143,7 +143,10 @@ export function security(options: SecurityOptions = {}): Middleware {
   }
 
   if (options.referrerPolicy !== false) {
-    staticHeaders.push(['Referrer-Policy', options.referrerPolicy ?? 'no-referrer'])
+    staticHeaders.push([
+      'Referrer-Policy',
+      options.referrerPolicy ?? 'no-referrer'
+    ])
   }
 
   if (options.xContentTypeOptions ?? true) {
@@ -158,7 +161,10 @@ export function security(options: SecurityOptions = {}): Middleware {
   }
 
   if (options.xFrameOptions !== false) {
-    staticHeaders.push(['X-Frame-Options', options.xFrameOptions ?? 'SAMEORIGIN'])
+    staticHeaders.push([
+      'X-Frame-Options',
+      options.xFrameOptions ?? 'SAMEORIGIN'
+    ])
   }
 
   const hstsValue =

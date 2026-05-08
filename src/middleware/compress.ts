@@ -143,7 +143,10 @@ function pickEncoding(
   if (normalized === 'deflate' && supported.includes('deflate')) {
     return 'deflate'
   }
-  if (normalized === 'gzip, deflate, br' || normalized === 'br, gzip, deflate') {
+  if (
+    normalized === 'gzip, deflate, br' ||
+    normalized === 'br, gzip, deflate'
+  ) {
     if (supported.includes('br')) return 'br'
     if (supported.includes('gzip')) return 'gzip'
     if (supported.includes('deflate')) return 'deflate'

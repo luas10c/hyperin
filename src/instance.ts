@@ -633,7 +633,7 @@ class Hyperin {
   #router: RadixRouter
   #server: Server | null = null
   #boundServer: Server | null = null
-  #prefix: string
+  #prefix: string = ''
 
   // ── Graceful shutdown state ──────────────────────────────────
   // Every open TCP socket, so we can destroy idle keep-alive
@@ -654,9 +654,10 @@ class Hyperin {
   #middlewareObservers = new Set<MiddlewareObserver>()
   #xPoweredByEnabled = false
   #trustProxyEnabled: TrustProxySetting = false
+  #maxQueryLength: number = 8 * 1024
+  #maxQueryParameters: number = 1000
 
-  constructor(opts: RouterOptions = {}) {
-    this.#prefix = opts.prefix || ''
+  constructor() {
     this.#router = new RadixRouter()
   }
 
@@ -1054,6 +1055,8 @@ class Hyperin {
 
     // Expose app-level proxy trust settings to the request instance
     request.locals.trustProxy = this.#trustProxyEnabled
+    request.locals.maxQueryLength = this.#maxQueryLength
+    request.locals.maxQueryParameters = this.#maxQueryParameters
     if (this.#trustProxyEnabled === false) {
       request.locals.trustedClientIp =
         normalizeIp(request.socket?.remoteAddress) ?? ''

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals'
-import { Agent, IncomingMessage, ServerResponse, request as sendHttpRequest } from 'node:http'
+import {
+  Agent,
+  IncomingMessage,
+  ServerResponse,
+  request as sendHttpRequest
+} from 'node:http'
 import type { Socket } from 'node:net'
 import { Duplex } from 'node:stream'
 import request, { type Response } from 'supertest'

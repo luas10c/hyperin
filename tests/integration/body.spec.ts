@@ -246,6 +246,25 @@ describe('body parsers', () => {
     })
   })
 
+  test('json rejects compressed payloads when compression ratio exceeds the configured limit', async () => {
+    const app = hyperin()
+    app.use(json({ limit: '1mb', maxCompressionRatio: 5 }))
+    app.post('/json', ({ request }) => request.body)
+    const body = await gzipJson({ payload: 'x'.repeat(256 * 1024) })
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .set('Content-Encoding', 'gzip')
+      .send(body)
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      error: 'Compression ratio exceeds limit',
+      type: 'encoding.ratio.exceeded'
+    })
+  })
+
   test('json rejects early when content-length exceeds limit', async () => {
     const app = hyperin()
     app.use(json({ limit: '1kb' }))

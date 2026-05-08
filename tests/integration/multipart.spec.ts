@@ -215,6 +215,24 @@ describe('multipart middleware', () => {
     })
   })
 
+  test('returns 413 when a text field exceeds maxFieldSize limit', async () => {
+    const app = hyperin()
+
+    app.use(multipart({ limits: { maxFieldSize: 4 } }))
+    app.post('/upload', ({ request }) => request.body)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .field('title', 'hello')
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      statusCode: 413,
+      error: 'Multipart field "title" exceeds maxFieldSize limit of 4 bytes',
+      method: 'POST'
+    })
+  })
+
   test('falls through when content-type is not multipart/form-data', async () => {
     const app = hyperin()
 

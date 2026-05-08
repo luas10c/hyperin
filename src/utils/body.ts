@@ -62,7 +62,11 @@ export function readBody(
     const onEnd = (): void => {
       cleanup()
       if (preallocated) {
-        resolve(offset === preallocated.length ? preallocated : preallocated.subarray(0, offset))
+        resolve(
+          offset === preallocated.length
+            ? preallocated
+            : preallocated.subarray(0, offset)
+        )
         return
       }
 
@@ -125,7 +129,8 @@ function createDecoder(
 async function decodeCompressedBuffer(
   payload: Buffer,
   encoding: 'gzip' | 'deflate' | 'br',
-  maxBytes: number
+  maxBytes: number,
+  options: { maxCompressionRatio?: number } = {}
 ): Promise<Buffer> {
   const decoder = createDecoder(encoding)
   const source = Readable.from(payload)
@@ -133,12 +138,26 @@ async function decodeCompressedBuffer(
   return await new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = []
     let total = 0
+    const compressedBytes = Math.max(1, payload.length)
 
     source.on('error', reject)
 
     decoder.on('data', (chunk: Buffer | string) => {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       total += buffer.length
+
+      if (
+        options.maxCompressionRatio !== undefined &&
+        total / compressedBytes > Math.max(1, options.maxCompressionRatio)
+      ) {
+        decoder.destroy(
+          Object.assign(new Error('Compression ratio exceeds limit'), {
+            status: 413,
+            type: 'encoding.ratio.exceeded'
+          })
+        )
+        return
+      }
 
       if (total > maxBytes) {
         decoder.destroy(
@@ -208,27 +227,17 @@ export async function readDecodedBody(
   }
 
   const compressedLimit = options.compressedLimit ?? maxBytes
-  const compressed = await readBody(
-    req,
-    compressedLimit,
-    expectedLength
-  )
-
-  if (options.maxCompressionRatio && compressed.length > 0) {
-    const ratioLimit = Math.max(1, options.maxCompressionRatio)
-    if (maxBytes / compressed.length > ratioLimit) {
-      throw Object.assign(new Error('Compression ratio exceeds limit'), {
-        status: 413,
-        type: 'encoding.ratio.exceeded'
-      })
-    }
-  }
+  const compressed = await readBody(req, compressedLimit, expectedLength)
 
   try {
-    return await decodeCompressedBuffer(compressed, encoding, maxBytes)
+    return await decodeCompressedBuffer(compressed, encoding, maxBytes, {
+      maxCompressionRatio: options.maxCompressionRatio
+    })
   } catch (error) {
     const normalized = parseSerializedBufferPayload(compressed)
     if (!normalized) throw error
-    return await decodeCompressedBuffer(normalized, encoding, maxBytes)
+    return await decodeCompressedBuffer(normalized, encoding, maxBytes, {
+      maxCompressionRatio: options.maxCompressionRatio
+    })
   }
 }

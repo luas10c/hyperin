@@ -181,21 +181,71 @@ export async function parseMultipart(
   type CurrentPart = {
     fieldname: string
     filename: string | null
-    buffers: Buffer[]
     size: number
     stream?: PassThrough
     info?: FileInfo
     pending?: Promise<void>
+    textBuffer?: Buffer
+    textBufferLength?: number
   }
 
   let totalBytes = 0
   let totalParts = 0
   let totalFiles = 0
   let totalFieldCount = 0
-  let buffer = Buffer.alloc(0)
+  let bufferStorage = Buffer.alloc(0)
+  let bufferStart = 0
+  let bufferEnd = 0
   let phase: 'start-boundary' | 'headers' | 'body' | 'after-boundary' | 'done' =
     'start-boundary'
   let currentPart: CurrentPart | null = null
+
+  const getBuffer = (): Buffer => bufferStorage.subarray(bufferStart, bufferEnd)
+
+  const bufferLength = (): number => bufferEnd - bufferStart
+
+  const resetBuffer = (): void => {
+    bufferStart = 0
+    bufferEnd = 0
+  }
+
+  const consumeBuffer = (length: number): void => {
+    bufferStart += length
+    if (bufferStart >= bufferEnd) {
+      resetBuffer()
+    }
+  }
+
+  const ensureBufferCapacity = (additionalBytes: number): void => {
+    const currentLength = bufferLength()
+    const required = currentLength + additionalBytes
+    const availableTail = bufferStorage.length - bufferEnd
+
+    if (availableTail >= additionalBytes) return
+
+    if (bufferStart > 0 && bufferStorage.length - currentLength >= additionalBytes) {
+      bufferStorage.copy(bufferStorage, 0, bufferStart, bufferEnd)
+      bufferEnd = currentLength
+      bufferStart = 0
+      return
+    }
+
+    const nextCapacity = Math.max(required, bufferStorage.length * 2, 4096)
+    const nextStorage = Buffer.allocUnsafe(nextCapacity)
+    if (currentLength > 0) {
+      bufferStorage.copy(nextStorage, 0, bufferStart, bufferEnd)
+    }
+    bufferStorage = nextStorage
+    bufferStart = 0
+    bufferEnd = currentLength
+  }
+
+  const appendBufferChunk = (chunk: Buffer): void => {
+    if (chunk.length === 0) return
+    ensureBufferCapacity(chunk.length)
+    chunk.copy(bufferStorage, bufferEnd)
+    bufferEnd += chunk.length
+  }
 
   const fail = (message: string, status = 400): never => {
     throw Object.assign(new Error(message), { status })
@@ -330,7 +380,30 @@ export async function parseMultipart(
       return
     }
 
-    part.buffers.push(chunk)
+    if (!part.textBuffer) {
+      part.textBuffer = Buffer.allocUnsafe(Math.max(chunk.length, 1024))
+      part.textBufferLength = 0
+    }
+
+    const currentLength = part.textBufferLength ?? 0
+    const nextLength = currentLength + chunk.length
+    if (nextLength > maxFieldSize) {
+      fail(
+        `Multipart field "${part.fieldname}" exceeds maxFieldSize limit of ${maxFieldSize} bytes`,
+        413
+      )
+    }
+
+    if (nextLength > part.textBuffer.length) {
+      const nextBuffer = Buffer.allocUnsafe(
+        Math.max(nextLength, part.textBuffer.length * 2)
+      )
+      part.textBuffer.copy(nextBuffer, 0, 0, currentLength)
+      part.textBuffer = nextBuffer
+    }
+
+    chunk.copy(part.textBuffer, currentLength)
+    part.textBufferLength = nextLength
   }
 
   const finalizeCurrentPart = async (): Promise<void> => {
@@ -344,13 +417,9 @@ export async function parseMultipart(
       part.stream?.end()
       await part.pending
     } else {
-      const merged = Buffer.concat(part.buffers)
-      if (merged.length > maxFieldSize) {
-        fail(
-          `Multipart field "${part.fieldname}" exceeds maxFieldSize limit of ${maxFieldSize} bytes`,
-          413
-        )
-      }
+      const merged = part.textBuffer
+        ? part.textBuffer.subarray(0, part.textBufferLength ?? 0)
+        : Buffer.alloc(0)
 
       if (!Object.prototype.hasOwnProperty.call(fields, part.fieldname)) {
         totalFieldCount++
@@ -459,7 +528,6 @@ export async function parseMultipart(
       currentPart = {
         fieldname,
         filename: info.filename,
-        buffers: [],
         size: 0,
         stream,
         info
@@ -506,7 +574,6 @@ export async function parseMultipart(
     currentPart = {
       fieldname,
       filename: null,
-      buffers: [],
       size: 0
     }
   }
@@ -522,11 +589,13 @@ export async function parseMultipart(
         fail('Payload Too Large', 413)
       }
 
-      buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk])
+      appendBufferChunk(chunk)
 
       while (true) {
+        const buffer = getBuffer()
+
         if (phase === 'done') {
-          buffer = Buffer.alloc(0)
+          resetBuffer()
           break
         }
 
@@ -545,7 +614,7 @@ export async function parseMultipart(
 
           if (suffix.equals(Buffer.from('--'))) {
             phase = 'done'
-            buffer = buffer.subarray(initialBoundary.length + 2)
+            consumeBuffer(initialBoundary.length + 2)
             continue
           }
 
@@ -553,7 +622,7 @@ export async function parseMultipart(
             fail('Malformed multipart body')
           }
 
-          buffer = buffer.subarray(initialBoundary.length + 2)
+          consumeBuffer(initialBoundary.length + 2)
           phase = 'headers'
           continue
         }
@@ -575,7 +644,7 @@ export async function parseMultipart(
           const headerSection = buffer
             .subarray(0, separatorIndex)
             .toString('utf8')
-          buffer = buffer.subarray(separatorIndex + doubleCrlf.length)
+          consumeBuffer(separatorIndex + doubleCrlf.length)
           startPart(headerSection)
           phase = 'body'
           continue
@@ -587,7 +656,7 @@ export async function parseMultipart(
             if (buffer.length <= trailingBytes) break
 
             const flushable = buffer.subarray(0, buffer.length - trailingBytes)
-            buffer = buffer.subarray(buffer.length - trailingBytes)
+            consumeBuffer(buffer.length - trailingBytes)
 
             if (currentPart) {
               await appendPartData(flushable)
@@ -612,7 +681,7 @@ export async function parseMultipart(
             await finalizeCurrentPart()
           }
 
-          buffer = buffer.subarray(delimiterIndex + boundaryDelimiter.length)
+          consumeBuffer(delimiterIndex + boundaryDelimiter.length)
           phase = 'after-boundary'
           continue
         }
@@ -622,7 +691,7 @@ export async function parseMultipart(
 
           const suffix = buffer.subarray(0, 2)
           if (suffix.equals(Buffer.from('--'))) {
-            buffer = buffer.subarray(2)
+            consumeBuffer(2)
             phase = 'done'
             continue
           }
@@ -631,7 +700,7 @@ export async function parseMultipart(
             fail('Malformed multipart body')
           }
 
-          buffer = buffer.subarray(2)
+          consumeBuffer(2)
           phase = 'headers'
         }
       }

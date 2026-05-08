@@ -46,8 +46,12 @@ describe('fetch adapter integration', () => {
     app.head('/head', () => 'should-not-be-sent')
     app.get('/empty', ({ response }) => response.status(204).text('ignored'))
 
-    const headResponse = await app.fetch(new Request('https://example.com/head', { method: 'HEAD' }))
-    const emptyResponse = await app.fetch(new Request('https://example.com/empty'))
+    const headResponse = await app.fetch(
+      new Request('https://example.com/head', { method: 'HEAD' })
+    )
+    const emptyResponse = await app.fetch(
+      new Request('https://example.com/empty')
+    )
 
     expect(headResponse.status).toBe(200)
     await expect(headResponse.text()).resolves.toBe('')
@@ -83,7 +87,9 @@ describe('fetch adapter integration', () => {
     abortController.abort()
 
     const abortedResponse = await abortedResponsePromise
-    const healthResponse = await app.fetch(new Request('https://example.com/health'))
+    const healthResponse = await app.fetch(
+      new Request('https://example.com/health')
+    )
 
     expect(abortedResponse.status).toBe(400)
     await expect(abortedResponse.json()).resolves.toEqual({
@@ -106,7 +112,9 @@ describe('fetch adapter integration', () => {
     const response = await app.fetch(new Request('https://example.com/stream'))
 
     expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toBe('application/octet-stream')
+    expect(response.headers.get('content-type')).toBe(
+      'application/octet-stream'
+    )
     expect(Buffer.from(await response.arrayBuffer())).toEqual(payload)
   })
 
@@ -124,9 +132,9 @@ describe('fetch adapter integration', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-encoding')).toBe('gzip')
-    expect(gunzipSync(Buffer.from(await response.arrayBuffer())).toString('utf8')).toBe(
-      'a'.repeat(256)
-    )
+    expect(
+      gunzipSync(Buffer.from(await response.arrayBuffer())).toString('utf8')
+    ).toBe('a'.repeat(256))
   })
 
   test('works with serveStatic and conditional requests through app.fetch', async () => {
@@ -136,7 +144,9 @@ describe('fetch adapter integration', () => {
     const app = hyperin()
     app.use('/public', serveStatic(resolve(dir), { etag: true }))
 
-    const first = await app.fetch(new Request('https://example.com/public/hello.txt'))
+    const first = await app.fetch(
+      new Request('https://example.com/public/hello.txt')
+    )
     const etag = first.headers.get('etag')
     const second = await app.fetch(
       new Request('https://example.com/public/hello.txt', {

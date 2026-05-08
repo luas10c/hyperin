@@ -14,6 +14,11 @@ export type RequestBody =
   | string
   | undefined
 
+export interface RequestQueryLimits {
+  maxLength?: number
+  maxParameters?: number
+}
+
 type RequestState = {
   parsedUrl: URL | null
   path: string | null
@@ -94,8 +99,14 @@ export class Request<
     }
   }
 
-  static #parseQueryString(query: string): ParsedUrlQuery {
-    if (query.length > MAX_QUERY_LENGTH) {
+  static #parseQueryString(
+    query: string,
+    limits: RequestQueryLimits = {}
+  ): ParsedUrlQuery {
+    const maxLength = limits.maxLength ?? MAX_QUERY_LENGTH
+    const maxParameters = limits.maxParameters ?? MAX_QUERY_PARAMETERS
+
+    if (query.length > maxLength) {
       throw Object.assign(new Error('Query string too large'), {
         statusCode: 414
       })
@@ -111,7 +122,7 @@ export class Request<
 
       if (separator > index) {
         pairs++
-        if (pairs > MAX_QUERY_PARAMETERS) {
+        if (pairs > maxParameters) {
           throw Object.assign(new Error('Too many query parameters'), {
             statusCode: 400
           })
@@ -186,7 +197,14 @@ export class Request<
       }
 
       state.query = (
-        state.rawQuery ? Request.#parseQueryString(state.rawQuery) : {}
+        state.rawQuery
+          ? Request.#parseQueryString(state.rawQuery, {
+              maxLength: (this.locals as { maxQueryLength?: number })
+                .maxQueryLength,
+              maxParameters: (this.locals as { maxQueryParameters?: number })
+                .maxQueryParameters
+            })
+          : {}
       ) as TQuery
     }
 

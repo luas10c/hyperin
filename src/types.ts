@@ -56,9 +56,9 @@ export type ErrorContext<
   TRequest extends Request = Request,
   TResponse extends object = Response
 > = HandlerContext<TRequest, TResponse> & {
-    error: Error
-    next: NextFunction
-  }
+  error: Error
+  next: NextFunction
+}
 
 export type RequestRefinement = {
   body?: unknown
@@ -246,9 +246,7 @@ export type Handler<TRequest extends Request = Request> =
 export type ErrorMiddleware<
   TRequest extends Request = Request,
   TResponse extends object = Response
-> = (
-  ctx: ErrorContext<TRequest, TResponse>
-) => void | Promise<void>
+> = (ctx: ErrorContext<TRequest, TResponse>) => void | Promise<void>
 export type ErrorHandler<TRequest extends Request = Request> =
   ErrorMiddleware<TRequest>
 export type AnyHandler = TypedMiddleware<
@@ -277,7 +275,11 @@ type MergeRefinement<
 >
 
 export type ApplyMiddleware<TRequest extends Request, TMiddleware> =
-  TMiddleware extends TypedMiddleware<TRequest, infer TRefinement, infer _TResponse>
+  TMiddleware extends TypedMiddleware<
+    TRequest,
+    infer TRefinement,
+    infer _TResponse
+  >
     ? MergeRefinement<TRequest, TRefinement>
     : never
 
@@ -358,27 +360,34 @@ type DeclaredResponseStatusCodes<
   TResponses extends RouteSchemaOptions['responses']
 > = Extract<keyof NonNullable<TResponses>, number>
 
-export type ResponseStatusCodes<TOptions extends RouteSchemaOptions> =
-  [DeclaredResponseStatusCodes<TOptions['responses']>] extends [never]
-    ? number
-    : DeclaredResponseStatusCodes<TOptions['responses']>
+export type ResponseStatusCodes<TOptions extends RouteSchemaOptions> = [
+  DeclaredResponseStatusCodes<TOptions['responses']>
+] extends [never]
+  ? number
+  : DeclaredResponseStatusCodes<TOptions['responses']>
 
 type ResponseEntryForStatus<
   TResponses extends RouteSchemaOptions['responses'],
   TStatus extends number
-> = NonNullable<TResponses> extends infer TDefinedResponses extends object
-  ? TStatus extends keyof TDefinedResponses
-    ? TDefinedResponses[TStatus]
-    : `${TStatus}` extends keyof TDefinedResponses
-      ? TDefinedResponses[`${TStatus}`]
-      : never
-  : never
+> =
+  NonNullable<TResponses> extends infer TDefinedResponses extends object
+    ? TStatus extends keyof TDefinedResponses
+      ? TDefinedResponses[TStatus]
+      : `${TStatus}` extends keyof TDefinedResponses
+        ? TDefinedResponses[`${TStatus}`]
+        : never
+    : never
 
-type NormalizeResponseContent<TEntry> = TEntry extends { content: infer TContent }
+type NormalizeResponseContent<TEntry> = TEntry extends {
+  content: infer TContent
+}
   ? TContent extends string
     ? Record<TContent, { schema: unknown }>
     : TContent
-  : TEntry extends { schema: infer TSchema; contentType: infer TContentType extends string }
+  : TEntry extends {
+        schema: infer TSchema
+        contentType: infer TContentType extends string
+      }
     ? Record<TContentType, { schema: TSchema }>
     : TEntry extends { schema: infer TSchema }
       ? { 'application/json': { schema: TSchema } }
@@ -388,26 +397,29 @@ type ContentSchemaByPattern<
   TResponses extends RouteSchemaOptions['responses'],
   TStatus extends number,
   TPattern extends string
-> = NormalizeResponseContent<
-  ResponseEntryForStatus<TResponses, TStatus>
-> extends infer TContent extends object
-  ? {
-      [TKey in keyof TContent]: TKey extends string
-        ? TKey extends TPattern
-          ? TContent[TKey] extends { schema: infer TSchema }
-            ? InferSchemaOutput<TSchema>
+> =
+  NormalizeResponseContent<
+    ResponseEntryForStatus<TResponses, TStatus>
+  > extends infer TContent extends object
+    ? {
+        [TKey in keyof TContent]: TKey extends string
+          ? TKey extends TPattern
+            ? TContent[TKey] extends { schema: infer TSchema }
+              ? InferSchemaOutput<TSchema>
+              : never
             : never
           : never
-        : never
-    }[keyof TContent]
-  : never
+      }[keyof TContent]
+    : never
 
 type JsonBodyForResponse<
   TResponses extends RouteSchemaOptions['responses'],
   TStatus extends number
 > = TResponses extends undefined
   ? object
-  : [ContentSchemaByPattern<TResponses, TStatus, `application/json${string}`>] extends [never]
+  : [
+        ContentSchemaByPattern<TResponses, TStatus, `application/json${string}`>
+      ] extends [never]
     ? never
     : ContentSchemaByPattern<TResponses, TStatus, `application/json${string}`>
 
@@ -416,7 +428,9 @@ type TextBodyForResponse<
   TStatus extends number
 > = TResponses extends undefined
   ? string
-  : [ContentSchemaByPattern<TResponses, TStatus, `text/plain${string}`>] extends [never]
+  : [
+        ContentSchemaByPattern<TResponses, TStatus, `text/plain${string}`>
+      ] extends [never]
     ? never
     : ContentSchemaByPattern<TResponses, TStatus, `text/plain${string}`>
 
@@ -424,16 +438,21 @@ export type TypedResponse<
   TResponses extends RouteSchemaOptions['responses'] = undefined,
   TStatusCode extends number = 200
 > = Omit<Response, 'status' | 'json' | 'text'> & {
-  status<TNextStatusCode extends ResponseStatusCodes<{ responses: TResponses }>>(
+  status<
+    TNextStatusCode extends ResponseStatusCodes<{ responses: TResponses }>
+  >(
     statusCode: TNextStatusCode
   ): TypedResponse<TResponses, TNextStatusCode>
-  json(body: JsonBodyForResponse<TResponses, TStatusCode>): TypedResponse<TResponses, TStatusCode>
-  text(body: TextBodyForResponse<TResponses, TStatusCode>): TypedResponse<TResponses, TStatusCode>
+  json(
+    body: JsonBodyForResponse<TResponses, TStatusCode>
+  ): TypedResponse<TResponses, TStatusCode>
+  text(
+    body: TextBodyForResponse<TResponses, TStatusCode>
+  ): TypedResponse<TResponses, TStatusCode>
 }
 
-export type ApplyRouteResponse<
-  TOptions extends RouteSchemaOptions
-> = TypedResponse<TOptions['responses']>
+export type ApplyRouteResponse<TOptions extends RouteSchemaOptions> =
+  TypedResponse<TOptions['responses']>
 
 export type RouteHandlerArgs<
   TPath extends string,
