@@ -81,7 +81,7 @@ describe('fetch adapter integration', () => {
         body: stream,
         duplex: 'half',
         signal: abortController.signal
-      })
+      } as RequestInit & { duplex: 'half' })
     )
 
     abortController.abort()

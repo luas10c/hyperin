@@ -29,6 +29,7 @@ export type HandlerReturn =
   | unknown[]
   | readonly unknown[]
   | Record<string, unknown>
+  | Response
   | Promise<
       | void
       | undefined
@@ -37,6 +38,7 @@ export type HandlerReturn =
       | unknown[]
       | readonly unknown[]
       | Record<string, unknown>
+      | Response
     >
 
 export type HandlerContext<
