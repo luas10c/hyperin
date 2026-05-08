@@ -129,6 +129,40 @@ describe('body parsers', () => {
     })
   })
 
+  test('json enforces maxDepth option', async () => {
+    const app = hyperin()
+    app.use(json({ maxDepth: 1 }))
+    app.post('/json', ({ request }) => request.body)
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .send({ a: { b: { c: 1 } } })
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      error: 'JSON depth limit exceeded',
+      type: 'entity.too.deep'
+    })
+  })
+
+  test('json enforces maxKeys option', async () => {
+    const app = hyperin()
+    app.use(json({ maxKeys: 2 }))
+    app.post('/json', ({ request }) => request.body)
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .send({ a: 1, b: 2, c: 3 })
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      error: 'JSON keys limit exceeded',
+      type: 'entity.too.many_keys'
+    })
+  })
+
   test('json verify can block request', async () => {
     const app = hyperin()
 

@@ -14,15 +14,24 @@ export interface StaticOptions {
   etag?: boolean
   /** Dotfiles: 'allow' | 'deny' | 'ignore' (default: 'ignore') */
   dotfiles?: 'allow' | 'deny' | 'ignore'
+  /** Metadata cache TTL in ms for HEAD responses. Set 0 to disable. */
+  metadataCacheTtlMs?: number
+  /** Maximum metadata cache entries. */
+  metadataCacheMaxEntries?: number
 }
 
 export function serveStatic(
   directory: string,
   options: StaticOptions = {}
 ): Middleware {
-  const { index = true, maxAge = 0, etag = true, dotfiles = 'ignore' } = options
-  const metadataTtlMs = 5_000
-  const metadataCacheMaxEntries = 512
+  const {
+    index = true,
+    maxAge = 0,
+    etag = true,
+    dotfiles = 'ignore',
+    metadataCacheTtlMs = 0,
+    metadataCacheMaxEntries = 512
+  } = options
   const resolvedDirectory = resolve(directory)
   const rootDirectoryPromise = realpath(resolvedDirectory).catch(
     () => resolvedDirectory
@@ -72,7 +81,7 @@ export function serveStatic(
   }> => {
     const now = Date.now()
     const cached = metadataCache.get(resolvedPath)
-    if (cached && cached.expiresAt > now) {
+    if (metadataCacheTtlMs > 0 && cached && cached.expiresAt > now) {
       return {
         stat: cached.stat,
         contentType: cached.contentType,
@@ -86,18 +95,20 @@ export function serveStatic(
     const etagValue = `"${fileStat.size}-${fileStat.mtimeMs}"`
     const lastModified = fileStat.mtime.toUTCString()
 
-    if (metadataCache.size >= metadataCacheMaxEntries) {
-      const oldest = metadataCache.keys().next().value
-      if (oldest) metadataCache.delete(oldest)
-    }
+    if (metadataCacheTtlMs > 0) {
+      if (metadataCache.size >= metadataCacheMaxEntries) {
+        const oldest = metadataCache.keys().next().value
+        if (oldest) metadataCache.delete(oldest)
+      }
 
-    metadataCache.set(resolvedPath, {
-      expiresAt: now + metadataTtlMs,
-      stat: fileStat,
-      contentType,
-      etagValue,
-      lastModified
-    })
+      metadataCache.set(resolvedPath, {
+        expiresAt: now + metadataCacheTtlMs,
+        stat: fileStat,
+        contentType,
+        etagValue,
+        lastModified
+      })
+    }
 
     return { stat: fileStat, contentType, etagValue, lastModified }
   }

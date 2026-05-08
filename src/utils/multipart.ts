@@ -163,6 +163,10 @@ export async function parseMultipart(
   const files = Object.create(null) as Record<string, unknown>
   const totalSizeLimit = limits.totalSize ?? 10 * 1024 * 1024
   const maxHeaderSize = limits.maxHeaderSize ?? 16 * 1024
+  const maxFieldSize = limits.maxFieldSize ?? 1024 * 1024
+  const maxFields = limits.maxFields ?? 1000
+  const maxParts = limits.maxParts ?? 2000
+  const maxFiles = limits.maxFiles ?? 1000
   const fieldFileCounts = new Map<string, number>()
   const fieldFileSizes = new Map<string, number>()
 
@@ -185,6 +189,9 @@ export async function parseMultipart(
   }
 
   let totalBytes = 0
+  let totalParts = 0
+  let totalFiles = 0
+  let totalFieldCount = 0
   let buffer = Buffer.alloc(0)
   let phase: 'start-boundary' | 'headers' | 'body' | 'after-boundary' | 'done' =
     'start-boundary'
@@ -330,10 +337,29 @@ export async function parseMultipart(
     const part = ensurePart()
 
     if (part.filename !== null) {
+      totalFiles++
+      if (totalFiles > maxFiles) {
+        fail(`Multipart file count exceeds limit of ${maxFiles}`, 413)
+      }
       part.stream?.end()
       await part.pending
     } else {
-      fields[part.fieldname] = Buffer.concat(part.buffers).toString('utf8')
+      const merged = Buffer.concat(part.buffers)
+      if (merged.length > maxFieldSize) {
+        fail(
+          `Multipart field "${part.fieldname}" exceeds maxFieldSize limit of ${maxFieldSize} bytes`,
+          413
+        )
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fields, part.fieldname)) {
+        totalFieldCount++
+        if (totalFieldCount > maxFields) {
+          fail(`Multipart field count exceeds limit of ${maxFields}`, 413)
+        }
+      }
+
+      fields[part.fieldname] = merged.toString('utf8')
     }
 
     currentPart = null
@@ -351,6 +377,11 @@ export async function parseMultipart(
   }
 
   const startPart = (headerSection: string): void => {
+    totalParts++
+    if (totalParts > maxParts) {
+      fail(`Multipart part count exceeds limit of ${maxParts}`, 413)
+    }
+
     const headers = parseHeaders(headerSection)
     const disposition = headers['content-disposition'] || ''
     const fieldname = extractParam(disposition, 'name')

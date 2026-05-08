@@ -80,4 +80,17 @@ describe('Request', () => {
     expect(enhanced.query).toEqual({ tag: ['node', 'bun'] })
     expect(enhanced.locals).toEqual({})
   })
+
+  test('throws when query string exceeds length limit', () => {
+    const request = createRequest(`/search?payload=${'x'.repeat(9 * 1024)}`)
+    expect(() => request.query).toThrow('Query string too large')
+  })
+
+  test('throws when query parameter count exceeds limit', () => {
+    const entries: string[] = []
+    for (let i = 0; i < 1001; i++) entries.push(`k${i}=1`)
+    const request = createRequest(`/search?${entries.join('&')}`)
+
+    expect(() => request.query).toThrow('Too many query parameters')
+  })
 })

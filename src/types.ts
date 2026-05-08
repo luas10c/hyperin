@@ -370,4 +370,12 @@ export type MultipartLimits = {
    * This applies before the terminating `\r\n\r\n` separator is found.
    */
   maxHeaderSize?: number
+  /** Maximum size in bytes of a non-file field value. */
+  maxFieldSize?: number
+  /** Maximum number of non-file fields. */
+  maxFields?: number
+  /** Maximum number of multipart parts (fields + files). */
+  maxParts?: number
+  /** Maximum number of files across all file fields. */
+  maxFiles?: number
 }

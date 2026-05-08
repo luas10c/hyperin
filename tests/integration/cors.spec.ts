@@ -113,4 +113,34 @@ describe('CORS middleware', () => {
     )
     expect(blocked.headers['access-control-allow-origin']).toBeUndefined()
   })
+
+  test('regex origin works consistently with global flag', async () => {
+    const app = hyperin()
+    app.use(cors({ origin: /https:\/\/client\.test/g }))
+    app.get('/resource', ({ response }) => {
+      response.send('ok')
+    })
+
+    const first: Response = await request(app)
+      .get('/resource')
+      .set('Origin', 'https://client.test')
+    const second: Response = await request(app)
+      .get('/resource')
+      .set('Origin', 'https://client.test')
+
+    expect(first.headers['access-control-allow-origin']).toBe(
+      'https://client.test'
+    )
+    expect(second.headers['access-control-allow-origin']).toBe(
+      'https://client.test'
+    )
+  })
+
+  test('strictCredentials blocks origin=true with credentials=true', () => {
+    expect(() =>
+      cors({ origin: true, credentials: true, strictCredentials: true })
+    ).toThrow(
+      'cors: origin=true with credentials=true is unsafe; use explicit allowlist'
+    )
+  })
 })

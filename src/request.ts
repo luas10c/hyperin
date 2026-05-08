@@ -29,6 +29,9 @@ type RequestInternals = IncomingMessage & {
   [REQUEST_STATE]?: RequestState
 }
 
+const MAX_QUERY_LENGTH = 8 * 1024
+const MAX_QUERY_PARAMETERS = 1000
+
 function isUnsafePropertyKey(key: string): boolean {
   return key === '__proto__' || key === 'constructor' || key === 'prototype'
 }
@@ -92,14 +95,28 @@ export class Request<
   }
 
   static #parseQueryString(query: string): ParsedUrlQuery {
+    if (query.length > MAX_QUERY_LENGTH) {
+      throw Object.assign(new Error('Query string too large'), {
+        statusCode: 414
+      })
+    }
+
     const parsed: ParsedUrlQuery = {}
     let index = 0
+    let pairs = 0
 
     while (index < query.length) {
       let separator = query.indexOf('&', index)
       if (separator === -1) separator = query.length
 
       if (separator > index) {
+        pairs++
+        if (pairs > MAX_QUERY_PARAMETERS) {
+          throw Object.assign(new Error('Too many query parameters'), {
+            statusCode: 400
+          })
+        }
+
         const entry = query.slice(index, separator)
         const equals = entry.indexOf('=')
         const rawKey = equals === -1 ? entry : entry.slice(0, equals)

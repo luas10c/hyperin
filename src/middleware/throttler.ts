@@ -472,8 +472,16 @@ export function throttler(options: RateLimitOptions = {}): Middleware {
   const requestPropertyName = options.requestPropertyName ?? 'rateLimit'
   const algorithm = options.algorithm ?? 'fixed-window'
   const windowMs = options.windowMs ?? 60_000
+  let warnedAboutKeyHeader = false
 
   return async ({ request, response, next }) => {
+    if (!warnedAboutKeyHeader && options.keyHeader && !options.keyGenerator) {
+      warnedAboutKeyHeader = true
+      console.warn(
+        '[hyperin] throttler keyHeader can be spoofed without trusted proxies; prefer keyGenerator in production'
+      )
+    }
+
     if (options.skip?.(request, response)) {
       return void (await next())
     }

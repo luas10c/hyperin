@@ -195,6 +195,19 @@ export function multipart<
       })
     }
 
+    const normalizedBoundary = boundary.trim()
+    if (
+      normalizedBoundary.length < 1 ||
+      normalizedBoundary.length > 200 ||
+      !/^[A-Za-z0-9'()+_,\-./:=?]+$/.test(normalizedBoundary)
+    ) {
+      return void response.status(400).json({
+        statusCode: 400,
+        error: 'Invalid multipart boundary',
+        method: request.method
+      })
+    }
+
     const contentLengthHeader = request.headers['content-length']
     const contentLength = Number(
       Array.isArray(contentLengthHeader)
@@ -213,7 +226,7 @@ export function multipart<
     try {
       const { fields, files } = await parseMultipart(
         request,
-        boundary,
+        normalizedBoundary,
         options,
         onFile
       )

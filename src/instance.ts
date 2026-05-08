@@ -38,6 +38,7 @@ import type {
 } from './types'
 
 export const HYPERIN_CORE = Symbol.for('hyperin.core')
+let trustProxyEnableWarningShown = false
 
 export type HttpMethod =
   | 'GET'
@@ -908,6 +909,12 @@ class Hyperin {
     }
     if (setting === 'trust proxy') {
       this.#trustProxyEnabled = true
+      if (!trustProxyEnableWarningShown) {
+        trustProxyEnableWarningShown = true
+        console.warn(
+          '[hyperin] trust proxy enabled globally; prefer app.set("trust proxy", allowlist/hops) in production'
+        )
+      }
     }
     return this
   }

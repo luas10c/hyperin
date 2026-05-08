@@ -198,7 +198,8 @@ function parseSerializedBufferPayload(payload: Buffer): Buffer | null {
 export async function readDecodedBody(
   req: Request,
   maxBytes: number,
-  expectedLength?: number
+  expectedLength?: number,
+  options: { compressedLimit?: number; maxCompressionRatio?: number } = {}
 ): Promise<Buffer> {
   const encoding = getContentEncoding(req)
 
@@ -206,7 +207,22 @@ export async function readDecodedBody(
     return readBody(req, maxBytes, expectedLength)
   }
 
-  const compressed = await readBody(req, maxBytes, expectedLength)
+  const compressedLimit = options.compressedLimit ?? maxBytes
+  const compressed = await readBody(
+    req,
+    compressedLimit,
+    expectedLength
+  )
+
+  if (options.maxCompressionRatio && compressed.length > 0) {
+    const ratioLimit = Math.max(1, options.maxCompressionRatio)
+    if (maxBytes / compressed.length > ratioLimit) {
+      throw Object.assign(new Error('Compression ratio exceeds limit'), {
+        status: 413,
+        type: 'encoding.ratio.exceeded'
+      })
+    }
+  }
 
   try {
     return await decodeCompressedBuffer(compressed, encoding, maxBytes)

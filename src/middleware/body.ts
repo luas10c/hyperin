@@ -46,6 +46,18 @@ export interface BodyParserOptions {
    * Default for URL-encoded: `'application/x-www-form-urlencoded'`.
    */
   type?: string | string[] | ((req: Request) => boolean)
+
+  /**
+   * Maximum compressed payload size when `inflate` is enabled.
+   * Defaults to the same value as `limit`.
+   */
+  compressedLimit?: string | number
+
+  /**
+   * Optional guard for compressed requests.
+   * If provided, rejects payloads with suspicious compression ratio.
+   */
+  maxCompressionRatio?: number
 }
 
 export interface JsonOptions extends BodyParserOptions {
@@ -59,6 +71,13 @@ export interface JsonOptions extends BodyParserOptions {
    * Reviver passed to `JSON.parse`.
    */
   reviver?: (key: string, value: unknown) => unknown
+
+  /** Maximum allowed object nesting depth. */
+  maxDepth?: number
+  /** Maximum total keys across objects. */
+  maxKeys?: number
+  /** Maximum allowed array length per array node. */
+  maxArrayLength?: number
 }
 
 export interface UrlencodedOptions extends BodyParserOptions {
@@ -128,7 +147,12 @@ function matchesType(
 /** Reads and decompresses the body, respecting the limit */
 async function readRawBody(
   req: Request,
-  options: { inflate: boolean; limit: number }
+  options: {
+    inflate: boolean
+    limit: number
+    compressedLimit?: number
+    maxCompressionRatio?: number
+  }
 ): Promise<Buffer> {
   const rawContentLength = req.headers['content-length']
   const contentLength =
@@ -172,8 +196,76 @@ async function readRawBody(
   return readDecodedBody(
     req,
     options.limit,
-    Number.isFinite(contentLength) ? contentLength : undefined
+    Number.isFinite(contentLength) ? contentLength : undefined,
+    {
+      compressedLimit: options.compressedLimit,
+      maxCompressionRatio: options.maxCompressionRatio
+    }
   )
+}
+
+function assertJsonShape(
+  value: unknown,
+  limits: { maxDepth?: number; maxKeys?: number; maxArrayLength?: number }
+): void {
+  const maxDepth = limits.maxDepth
+  const maxKeys = limits.maxKeys
+  const maxArrayLength = limits.maxArrayLength
+  if (maxDepth === undefined && maxKeys === undefined && maxArrayLength === undefined) {
+    return
+  }
+
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }]
+  let totalKeys = 0
+
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    if (maxDepth !== undefined && current.depth > maxDepth) {
+      throw Object.assign(new Error('JSON depth limit exceeded'), {
+        status: 413,
+        type: 'entity.too.deep'
+      })
+    }
+
+    if (Array.isArray(current.value)) {
+      if (
+        maxArrayLength !== undefined &&
+        current.value.length > maxArrayLength
+      ) {
+        throw Object.assign(new Error('JSON array length limit exceeded'), {
+          status: 413,
+          type: 'entity.array.too.large'
+        })
+      }
+
+      for (let i = current.value.length - 1; i >= 0; i--) {
+        const entry = current.value[i]
+        if (entry !== null && typeof entry === 'object') {
+          stack.push({ value: entry, depth: current.depth + 1 })
+        }
+      }
+      continue
+    }
+
+    if (current.value !== null && typeof current.value === 'object') {
+      const obj = current.value as Record<string, unknown>
+      const keys = Object.keys(obj)
+      totalKeys += keys.length
+      if (maxKeys !== undefined && totalKeys > maxKeys) {
+        throw Object.assign(new Error('JSON keys limit exceeded'), {
+          status: 413,
+          type: 'entity.too.many_keys'
+        })
+      }
+
+      for (let i = keys.length - 1; i >= 0; i--) {
+        const next = obj[keys[i]!]
+        if (next !== null && typeof next === 'object') {
+          stack.push({ value: next, depth: current.depth + 1 })
+        }
+      }
+    }
+  }
 }
 
 /** Resolve the limit in bytes from a string or number */
@@ -197,6 +289,7 @@ export function json(options: JsonOptions = {}): Middleware {
   const reviver = options.reviver
   const verify = options.verify
   const limit = resolveLimit(options.limit, '100kb')
+  const compressedLimit = resolveLimit(options.compressedLimit, String(limit))
   const type = options.type ?? 'application/json'
 
   return async ({ request, response, next }) => {
@@ -230,7 +323,12 @@ export function json(options: JsonOptions = {}): Middleware {
     // 3. Read the body
     let buf: Buffer
     try {
-      buf = await readRawBody(request, { inflate, limit })
+      buf = await readRawBody(request, {
+        inflate,
+        limit,
+        compressedLimit,
+        maxCompressionRatio: options.maxCompressionRatio
+      })
     } catch (err) {
       const e = err as { status?: number; type?: string; message: string }
       return void response
@@ -281,7 +379,22 @@ export function json(options: JsonOptions = {}): Middleware {
     // 8. Parseia
     try {
       request.body = JSON.parse(text, reviver)
-    } catch {
+      assertJsonShape(request.body, {
+        maxDepth: options.maxDepth,
+        maxKeys: options.maxKeys,
+        maxArrayLength: options.maxArrayLength
+      })
+    } catch (error) {
+      const typed = error as { status?: number; type?: string; message?: string }
+      if (typed?.status) {
+        return void response
+          .status(typed.status)
+          .json({
+            error: typed.message ?? 'Invalid JSON body',
+            type: typed.type ?? 'entity.parse.failed'
+          })
+      }
+
       return void response
         .status(400)
         .json({ error: 'Invalid JSON body', type: 'entity.parse.failed' })

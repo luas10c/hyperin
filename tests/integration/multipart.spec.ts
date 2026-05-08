@@ -156,6 +156,25 @@ describe('multipart middleware', () => {
     })
   })
 
+  test('returns 400 when boundary is invalid', async () => {
+    const app = hyperin()
+
+    app.use(multipart())
+    app.post('/upload', ({ request }) => request.body)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .set('Content-Type', 'multipart/form-data; boundary=@@@invalid@@@')
+      .send('abc')
+
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual({
+      statusCode: 400,
+      error: 'Invalid multipart boundary',
+      method: 'POST'
+    })
+  })
+
   test('returns 413 when multipart body exceeds configured limit', async () => {
     const app = hyperin()
 
@@ -173,6 +192,25 @@ describe('multipart middleware', () => {
     expect(response.body).toEqual({
       statusCode: 413,
       error: 'Payload Too Large',
+      method: 'POST'
+    })
+  })
+
+  test('returns 413 when multipart fields exceed maxFields limit', async () => {
+    const app = hyperin()
+
+    app.use(multipart({ limits: { maxFields: 1 } }))
+    app.post('/upload', ({ request }) => request.body)
+
+    const response: Response = await request(app)
+      .post('/upload')
+      .field('a', '1')
+      .field('b', '2')
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      statusCode: 413,
+      error: 'Multipart field count exceeds limit of 1',
       method: 'POST'
     })
   })

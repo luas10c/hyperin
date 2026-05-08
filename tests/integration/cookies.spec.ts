@@ -102,7 +102,7 @@ describe('cookies middleware', () => {
     const app = hyperin()
     const secret = 'shhh'
 
-    app.use(cookies({ secret }))
+    app.use(cookies({ secret, enforceSecretLength: false }))
     app.get('/me', ({ request }) => ({
       cookies: request.cookies,
       signedCookies: request.signedCookies
@@ -131,5 +131,38 @@ describe('cookies middleware', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ theme: 'dark mode', session: 'abc 123' })
+  })
+
+  test('ignores cookies when custom decode throws', async () => {
+    const app = hyperin()
+
+    app.use(
+      cookies({
+        decode: () => {
+          throw new Error('invalid cookie')
+        }
+      })
+    )
+    app.get('/me', ({ request }) => request.cookies)
+
+    const response: Response = await request(app)
+      .get('/me')
+      .set('Cookie', ['theme=dark', 'session=abc'])
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({})
+  })
+
+  test('rejects oversized Cookie header', async () => {
+    const app = hyperin()
+
+    app.use(cookies({ maxCookieHeaderSize: 32 }))
+    app.get('/me', ({ request }) => request.cookies)
+
+    const response: Response = await request(app)
+      .get('/me')
+      .set('Cookie', `a=${'x'.repeat(200)}`)
+
+    expect(response.status).toBe(400)
   })
 })

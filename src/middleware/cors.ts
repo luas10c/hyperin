@@ -32,6 +32,7 @@ export interface CorsOptions {
   maxAge?: number
   preflightContinue?: boolean
   optionsSuccessStatus?: number
+  strictCredentials?: boolean
 }
 
 const DEFAULT_CORS: Required<CorsOptions> = {
@@ -42,7 +43,13 @@ const DEFAULT_CORS: Required<CorsOptions> = {
   credentials: false,
   maxAge: 0,
   preflightContinue: false,
-  optionsSuccessStatus: 204
+  optionsSuccessStatus: 204,
+  strictCredentials: false
+}
+
+function testOriginRegex(regex: RegExp, value: string): boolean {
+  regex.lastIndex = 0
+  return regex.test(value)
 }
 
 function appendVary(
@@ -89,13 +96,13 @@ async function resolveOrigin(
   }
 
   if (origin instanceof RegExp) {
-    return reqOrigin && origin.test(reqOrigin) ? reqOrigin : false
+    return reqOrigin && testOriginRegex(origin, reqOrigin) ? reqOrigin : false
   }
 
   if (Array.isArray(origin)) {
     return reqOrigin &&
       origin.some((o: RegExp | string) =>
-        o instanceof RegExp ? o.test(reqOrigin) : o === reqOrigin
+        o instanceof RegExp ? testOriginRegex(o, reqOrigin) : o === reqOrigin
       )
       ? reqOrigin
       : false
@@ -120,6 +127,12 @@ function resolveAllowedOrigin(
 
 export function cors(options: CorsOptions = {}): Middleware {
   const cfg = { ...DEFAULT_CORS, ...options }
+
+  if (cfg.strictCredentials && cfg.credentials && cfg.origin === true) {
+    throw new TypeError(
+      'cors: origin=true with credentials=true is unsafe; use explicit allowlist'
+    )
+  }
 
   return async ({ request, response, next }) => {
     const reqOrigin = request.headers['origin'] as string | undefined
