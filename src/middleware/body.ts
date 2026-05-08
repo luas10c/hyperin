@@ -16,7 +16,7 @@ function isUnsafePropertyKey(key: string): boolean {
 export interface BodyParserOptions {
   /**
    * Maximum body size.
-   * Examples: `'100kb'`, `'1mb'`.
+   * Examples: `'100kb'`, `'1mb'`, `'10mb'`.
    * @default '100kb'
    */
   limit?: string | number
@@ -130,6 +130,28 @@ async function readRawBody(
   req: Request,
   options: { inflate: boolean; limit: number }
 ): Promise<Buffer> {
+  const rawContentLength = req.headers['content-length']
+  const contentLength =
+    typeof rawContentLength === 'string'
+      ? Number.parseInt(rawContentLength, 10)
+      : Array.isArray(rawContentLength)
+        ? Number.parseInt(rawContentLength[0] ?? '', 10)
+        : NaN
+
+  if (rawContentLength !== undefined && !Number.isFinite(contentLength)) {
+    throw Object.assign(new Error('Invalid Content-Length header'), {
+      status: 400,
+      type: 'request.invalid_content_length'
+    })
+  }
+
+  if (Number.isFinite(contentLength) && contentLength > options.limit) {
+    throw Object.assign(new Error('Payload Too Large'), {
+      status: 413,
+      type: 'entity.too.large'
+    })
+  }
+
   if (!options.inflate) {
     const encoding = getContentEncoding(req)
 
@@ -140,10 +162,18 @@ async function readRawBody(
       )
     }
 
-    return readBody(req, options.limit)
+    return readBody(
+      req,
+      options.limit,
+      Number.isFinite(contentLength) ? contentLength : undefined
+    )
   }
 
-  return readDecodedBody(req, options.limit)
+  return readDecodedBody(
+    req,
+    options.limit,
+    Number.isFinite(contentLength) ? contentLength : undefined
+  )
 }
 
 /** Resolve the limit in bytes from a string or number */
@@ -230,7 +260,16 @@ export function json(options: JsonOptions = {}): Middleware {
 
     // 7. strict mode: só aceita objeto ou array no topo
     if (strict) {
-      const first = text.trimStart()[0]
+      let start = 0
+      while (start < text.length) {
+        const code = text.charCodeAt(start)
+        if (code !== 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) {
+          break
+        }
+        start++
+      }
+
+      const first = text[start]
       if (first !== '{' && first !== '[') {
         return void response.status(400).json({
           error: 'Invalid JSON — strict mode only accepts objects and arrays',

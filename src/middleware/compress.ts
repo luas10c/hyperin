@@ -137,6 +137,18 @@ function pickEncoding(
   const value = Array.isArray(header) ? header.join(',') : header
   if (!value) return null
 
+  const normalized = value.toLowerCase()
+  if (normalized === 'gzip' && supported.includes('gzip')) return 'gzip'
+  if (normalized === 'br' && supported.includes('br')) return 'br'
+  if (normalized === 'deflate' && supported.includes('deflate')) {
+    return 'deflate'
+  }
+  if (normalized === 'gzip, deflate, br' || normalized === 'br, gzip, deflate') {
+    if (supported.includes('br')) return 'br'
+    if (supported.includes('gzip')) return 'gzip'
+    if (supported.includes('deflate')) return 'deflate'
+  }
+
   let best: CompressionEncoding | null = null
   let bestQ = 0
 
@@ -230,6 +242,10 @@ export function compress(options: CompressOptions = {}): Middleware {
   const filter = options.filter ?? isCompressibleContentType
 
   return async ({ request, response, next }) => {
+    if (request.method === 'HEAD' || supportedEncodings.length === 0) {
+      return void (await next())
+    }
+
     const selectedEncoding = pickEncoding(
       request.headers['accept-encoding'],
       supportedEncodings

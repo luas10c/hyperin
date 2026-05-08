@@ -76,6 +76,22 @@ describe('serveStatic middleware', () => {
     expect(second.status).toBe(304)
   })
 
+  test('responds to HEAD without body and with file headers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hyperin-static-'))
+    await writeFile(join(dir, 'hello.txt'), 'cache')
+
+    const app = hyperin()
+    app.use('/public', serveStatic(resolve(dir), { etag: true, maxAge: 60 }))
+
+    const response: Response = await request(app).head('/public/hello.txt')
+
+    expect(response.status).toBe(200)
+    expect(response.headers['content-type']).toBe('text/plain; charset=utf-8')
+    expect(response.headers['cache-control']).toBe('public, max-age=60')
+    expect(response.headers['etag']).toBeTruthy()
+    expect(response.text).toBeUndefined()
+  })
+
   test('returns 400 for malformed encoded path', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'hyperin-static-'))
     await writeFile(join(dir, 'hello.txt'), 'oi')

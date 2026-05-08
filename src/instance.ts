@@ -18,6 +18,7 @@ import {
   type DescribeOperationInput
 } from './openapi'
 import {
+  normalizeIp,
   parseForwardedHeader,
   resolveTrustedClientIp,
   shouldTrustForwardedHeaders,
@@ -1112,23 +1113,29 @@ class Hyperin {
 
     // Expose app-level proxy trust settings to the request instance
     request.locals.trustProxy = this.#trustProxyEnabled
-    const trustedForwardedHeaders = await shouldTrustForwardedHeaders(
-      request.socket?.remoteAddress,
-      this.#trustProxyEnabled
-    )
-    request.locals.trustedClientIp = await resolveTrustedClientIp(
-      request.socket?.remoteAddress,
-      request.headers['x-forwarded-for'],
-      this.#trustProxyEnabled,
-      trustedForwardedHeaders
-    )
-
-    if (trustedForwardedHeaders) {
-      request.locals.trustedForwardedProtocol = parseForwardedHeader(
-        request.headers['x-forwarded-proto']
-      )[0]
-    } else {
+    if (this.#trustProxyEnabled === false) {
+      request.locals.trustedClientIp =
+        normalizeIp(request.socket?.remoteAddress) ?? ''
       request.locals.trustedForwardedProtocol = undefined
+    } else {
+      const trustedForwardedHeaders = await shouldTrustForwardedHeaders(
+        request.socket?.remoteAddress,
+        this.#trustProxyEnabled
+      )
+      request.locals.trustedClientIp = await resolveTrustedClientIp(
+        request.socket?.remoteAddress,
+        request.headers['x-forwarded-for'],
+        this.#trustProxyEnabled,
+        trustedForwardedHeaders
+      )
+
+      if (trustedForwardedHeaders) {
+        request.locals.trustedForwardedProtocol = parseForwardedHeader(
+          request.headers['x-forwarded-proto']
+        )[0]
+      } else {
+        request.locals.trustedForwardedProtocol = undefined
+      }
     }
 
     if (this.#xPoweredByEnabled && !response.hasHeader('X-Powered-By')) {
@@ -1151,6 +1158,28 @@ class Hyperin {
     request.params = match.params
 
     const { handlers, middlewares } = match
+    if (middlewares.length === 0 && handlers.length === 1) {
+      const context = {
+        request,
+        response,
+        next: async () => undefined
+      }
+
+      try {
+        const result = handlers[0]!(context)
+        if (isPromiseLike(result)) {
+          const value = await result
+          this.#writeHandlerResult(response, value)
+        } else {
+          this.#writeHandlerResult(response, result)
+        }
+      } catch (error) {
+        await this.#runErrorMiddlewares(error as Error, request, response)
+      }
+
+      return
+    }
+
     // It iterates through global middlewares followed by route handlers without creating a new array.
     const mLen = middlewares.length
     const hLen = handlers.length
@@ -1205,12 +1234,19 @@ class Hyperin {
 
     context.next = next
 
-    await this.#requestContext.run({ active: true }, async () => {
+    const executeDispatch = async (): Promise<void> => {
       const initialResult = dispatchNext()
       if (isPromiseLike(initialResult)) {
         await initialResult
       }
-    })
+    }
+
+    if (this.#shuttingDown) {
+      await this.#requestContext.run({ active: true }, executeDispatch)
+      return
+    }
+
+    await executeDispatch()
   }
 
   async #runErrorMiddlewares(

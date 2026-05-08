@@ -58,7 +58,9 @@ function canResponseHaveBody(request: Request, statusCode: number): boolean {
   )
 }
 
-function createNodeRequestFromWebRequest(webRequest: globalThis.Request): Request {
+function createNodeRequestFromWebRequest(
+  webRequest: globalThis.Request
+): Request {
   const request = new Request(new Socket())
   const target = new URL(webRequest.url)
   const socket = request.socket as Socket & {
@@ -106,7 +108,9 @@ function createNodeRequestFromWebRequest(webRequest: globalThis.Request): Reques
   const abortRequest = () => {
     request.emit('aborted')
     source.destroy(Object.assign(new Error('Request aborted'), { status: 400 }))
-    request.destroy(Object.assign(new Error('Request aborted'), { status: 400 }))
+    request.destroy(
+      Object.assign(new Error('Request aborted'), { status: 400 })
+    )
   }
 
   if (webRequest.signal.aborted) {
@@ -153,9 +157,7 @@ function normalizeBodyChunk(
   return Buffer.from(chunk, encoding)
 }
 
-function createWebResponseBridge(
-  request: Request
-): {
+function createWebResponseBridge(request: Request): {
   response: Response
   started: Promise<globalThis.Response>
 } {

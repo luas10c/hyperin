@@ -79,6 +79,56 @@ describe('body parsers', () => {
     expect(response.body).toEqual({ value: 'abc' })
   })
 
+  test('json accepts payloads larger than 100kb when limit is increased', async () => {
+    const app = hyperin()
+    app.use(json({ limit: '1mb' }))
+    app.post('/json', ({ request }) => ({
+      size: (request.body as { payload: string }).payload.length
+    }))
+
+    const largePayload = { payload: 'x'.repeat(220 * 1024) }
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .send(largePayload)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      size: largePayload.payload.length
+    })
+  })
+
+  test('json enforces 1mb boundary reliably', async () => {
+    const app = hyperin()
+    app.use(json({ limit: '1mb' }))
+    app.post('/json', ({ request }) => ({
+      size: (request.body as { payload: string }).payload.length
+    }))
+
+    const withinLimitPayload = { payload: 'x'.repeat(1024 * 1024 - 1024) }
+    const exceedingLimitPayload = { payload: 'x'.repeat(1024 * 1024 + 2048) }
+
+    const okResponse: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .send(withinLimitPayload)
+
+    expect(okResponse.status).toBe(200)
+    expect(okResponse.body).toEqual({ size: withinLimitPayload.payload.length })
+
+    const failResponse: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .send(exceedingLimitPayload)
+
+    expect(failResponse.status).toBe(413)
+    expect(failResponse.body).toEqual({
+      error: 'Payload Too Large',
+      type: 'entity.too.large'
+    })
+  })
+
   test('json verify can block request', async () => {
     const app = hyperin()
 
@@ -158,6 +208,23 @@ describe('body parsers', () => {
     expect(response.status).toBe(413)
     expect(response.body).toEqual({
       error: 'Body exceeds limit',
+      type: 'entity.too.large'
+    })
+  })
+
+  test('json rejects early when content-length exceeds limit', async () => {
+    const app = hyperin()
+    app.use(json({ limit: '1kb' }))
+    app.post('/json', ({ request }) => request.body)
+
+    const response: Response = await request(app)
+      .post('/json')
+      .set('Content-Type', 'application/json')
+      .send({ payload: 'x'.repeat(32 * 1024) })
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({
+      error: 'Payload Too Large',
       type: 'entity.too.large'
     })
   })
@@ -257,6 +324,36 @@ describe('body parsers', () => {
     expect(response.body).toEqual({
       error: 'Object depth limit (1) exceeded',
       type: 'parameters.depth.exceeded'
+    })
+  })
+
+  test('urlencoded enforces 1mb boundary reliably', async () => {
+    const app = hyperin()
+    app.use(urlencoded({ limit: '1mb' }))
+    app.post('/form', ({ request }) => ({
+      size: (request.body as { payload: string }).payload.length
+    }))
+
+    const withinLimit = `payload=${'x'.repeat(1024 * 1024 - 2048)}`
+    const overLimit = `payload=${'x'.repeat(1024 * 1024 + 2048)}`
+
+    const okResponse: Response = await request(app)
+      .post('/form')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send(withinLimit)
+
+    expect(okResponse.status).toBe(200)
+    expect(okResponse.body).toEqual({ size: 1024 * 1024 - 2048 })
+
+    const failResponse: Response = await request(app)
+      .post('/form')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send(overLimit)
+
+    expect(failResponse.status).toBe(413)
+    expect(failResponse.body).toEqual({
+      error: 'Payload Too Large',
+      type: 'entity.too.large'
     })
   })
 })

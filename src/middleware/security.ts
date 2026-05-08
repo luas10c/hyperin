@@ -114,70 +114,65 @@ function setHeaderIfAbsent(
 export function security(options: SecurityOptions = {}): Middleware {
   const hsts =
     options.hsts === false ? false : { ...DEFAULT_HSTS, ...options.hsts }
+  const staticHeaders: Array<[string, string]> = []
+
+  if (options.contentSecurityPolicy !== false) {
+    staticHeaders.push([
+      'Content-Security-Policy',
+      options.contentSecurityPolicy ??
+        "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'"
+    ])
+  }
+
+  if (options.crossOriginOpenerPolicy !== false) {
+    staticHeaders.push([
+      'Cross-Origin-Opener-Policy',
+      options.crossOriginOpenerPolicy ?? 'same-origin'
+    ])
+  }
+
+  if (options.crossOriginResourcePolicy !== false) {
+    staticHeaders.push([
+      'Cross-Origin-Resource-Policy',
+      options.crossOriginResourcePolicy ?? 'same-origin'
+    ])
+  }
+
+  if (options.originAgentCluster ?? true) {
+    staticHeaders.push(['Origin-Agent-Cluster', '?1'])
+  }
+
+  if (options.referrerPolicy !== false) {
+    staticHeaders.push(['Referrer-Policy', options.referrerPolicy ?? 'no-referrer'])
+  }
+
+  if (options.xContentTypeOptions ?? true) {
+    staticHeaders.push(['X-Content-Type-Options', 'nosniff'])
+  }
+
+  if (options.xDnsPrefetchControl !== false) {
+    staticHeaders.push([
+      'X-DNS-Prefetch-Control',
+      options.xDnsPrefetchControl ?? 'off'
+    ])
+  }
+
+  if (options.xFrameOptions !== false) {
+    staticHeaders.push(['X-Frame-Options', options.xFrameOptions ?? 'SAMEORIGIN'])
+  }
+
+  const hstsValue =
+    hsts &&
+    `${`max-age=${hsts.maxAge}`}${hsts.includeSubDomains ? '; includeSubDomains' : ''}${hsts.preload ? '; preload' : ''}`
 
   return async ({ request, response, next }) => {
-    if (options.contentSecurityPolicy !== false) {
-      setHeaderIfAbsent(
-        response,
-        'Content-Security-Policy',
-        options.contentSecurityPolicy ??
-          "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'"
-      )
+    for (let i = 0; i < staticHeaders.length; i++) {
+      const [name, value] = staticHeaders[i]!
+      setHeaderIfAbsent(response, name, value)
     }
 
-    if (options.crossOriginOpenerPolicy !== false) {
-      setHeaderIfAbsent(
-        response,
-        'Cross-Origin-Opener-Policy',
-        options.crossOriginOpenerPolicy ?? 'same-origin'
-      )
-    }
-
-    if (options.crossOriginResourcePolicy !== false) {
-      setHeaderIfAbsent(
-        response,
-        'Cross-Origin-Resource-Policy',
-        options.crossOriginResourcePolicy ?? 'same-origin'
-      )
-    }
-
-    if (options.originAgentCluster ?? true) {
-      setHeaderIfAbsent(response, 'Origin-Agent-Cluster', '?1')
-    }
-
-    if (options.referrerPolicy !== false) {
-      setHeaderIfAbsent(
-        response,
-        'Referrer-Policy',
-        options.referrerPolicy ?? 'no-referrer'
-      )
-    }
-
-    if (options.xContentTypeOptions ?? true) {
-      setHeaderIfAbsent(response, 'X-Content-Type-Options', 'nosniff')
-    }
-
-    if (options.xDnsPrefetchControl !== false) {
-      setHeaderIfAbsent(
-        response,
-        'X-DNS-Prefetch-Control',
-        options.xDnsPrefetchControl ?? 'off'
-      )
-    }
-
-    if (options.xFrameOptions !== false) {
-      setHeaderIfAbsent(
-        response,
-        'X-Frame-Options',
-        options.xFrameOptions ?? 'SAMEORIGIN'
-      )
-    }
-
-    if (hsts && isSecureRequest(request)) {
-      let value = `max-age=${hsts.maxAge}`
-      if (hsts.includeSubDomains) value += '; includeSubDomains'
-      if (hsts.preload) value += '; preload'
-      setHeaderIfAbsent(response, 'Strict-Transport-Security', value)
+    if (hstsValue && isSecureRequest(request)) {
+      setHeaderIfAbsent(response, 'Strict-Transport-Security', hstsValue)
     }
 
     await next()

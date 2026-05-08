@@ -2,7 +2,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { resolve, join, relative, isAbsolute, sep } from 'node:path'
 import type { Stats } from 'node:fs'
 
-import { pipeFile } from '#/utils/static'
+import { mimeTypes, pipeFile } from '#/utils/static'
 import type { Middleware } from '#/types'
 
 export interface StaticOptions {
@@ -21,10 +21,22 @@ export function serveStatic(
   options: StaticOptions = {}
 ): Middleware {
   const { index = true, maxAge = 0, etag = true, dotfiles = 'ignore' } = options
+  const metadataTtlMs = 5_000
+  const metadataCacheMaxEntries = 512
   const resolvedDirectory = resolve(directory)
   const rootDirectoryPromise = realpath(resolvedDirectory).catch(
     () => resolvedDirectory
   )
+  const metadataCache = new Map<
+    string,
+    {
+      expiresAt: number
+      stat: Stats
+      contentType: string
+      etagValue: string
+      lastModified: string
+    }
+  >()
   const isMissingPathError = (error: unknown): boolean => {
     const code = (error as NodeJS.ErrnoException | undefined)?.code
     return code === 'ENOENT' || code === 'ENOTDIR'
@@ -47,6 +59,47 @@ export function serveStatic(
       path: resolvedTarget,
       stat: await stat(resolvedTarget)
     }
+  }
+
+  const getMetadata = async (
+    resolvedPath: string,
+    fileStat: Stats
+  ): Promise<{
+    stat: Stats
+    contentType: string
+    etagValue: string
+    lastModified: string
+  }> => {
+    const now = Date.now()
+    const cached = metadataCache.get(resolvedPath)
+    if (cached && cached.expiresAt > now) {
+      return {
+        stat: cached.stat,
+        contentType: cached.contentType,
+        etagValue: cached.etagValue,
+        lastModified: cached.lastModified
+      }
+    }
+
+    const ext = resolvedPath.slice(resolvedPath.lastIndexOf('.')).toLowerCase()
+    const contentType = mimeTypes[ext] || 'application/octet-stream'
+    const etagValue = `"${fileStat.size}-${fileStat.mtimeMs}"`
+    const lastModified = fileStat.mtime.toUTCString()
+
+    if (metadataCache.size >= metadataCacheMaxEntries) {
+      const oldest = metadataCache.keys().next().value
+      if (oldest) metadataCache.delete(oldest)
+    }
+
+    metadataCache.set(resolvedPath, {
+      expiresAt: now + metadataTtlMs,
+      stat: fileStat,
+      contentType,
+      etagValue,
+      lastModified
+    })
+
+    return { stat: fileStat, contentType, etagValue, lastModified }
   }
 
   return async ({ request, response, next }) => {
@@ -155,6 +208,45 @@ export function serveStatic(
           etag
         }
       )
+    }
+
+    if (request.method === 'HEAD') {
+      const metadata = await getMetadata(resolvedFile.path, fileStat)
+      if (etag) {
+        const ifNoneMatch = request.headers['if-none-match']
+        if (ifNoneMatch && ifNoneMatch === metadata.etagValue) {
+          response.statusCode = 304
+          response.end()
+          return
+        }
+      }
+
+      const ifModifiedSince = request.headers['if-modified-since']
+      if (ifModifiedSince) {
+        const since = new Date(ifModifiedSince).getTime()
+        if (
+          !isNaN(since) &&
+          Math.floor(metadata.stat.mtimeMs / 1000) <= Math.floor(since / 1000)
+        ) {
+          response.statusCode = 304
+          response.end()
+          return
+        }
+      }
+
+      response.setHeader('Content-Type', metadata.contentType)
+      response.setHeader('Content-Length', metadata.stat.size)
+      response.setHeader('Last-Modified', metadata.lastModified)
+      response.setHeader(
+        'Cache-Control',
+        maxAge ? `public, max-age=${maxAge}` : 'no-cache'
+      )
+      if (etag) {
+        response.setHeader('ETag', metadata.etagValue)
+      }
+      response.statusCode = 200
+      response.end()
+      return
     }
 
     pipeFile(resolvedFile.path, fileStat, request, response, { maxAge, etag })

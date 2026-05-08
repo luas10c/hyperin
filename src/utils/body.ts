@@ -23,26 +23,73 @@ export function parseLimit(limit: string): number {
   return Math.floor(value * (units[match[2]?.toLowerCase() || 'b'] || 1))
 }
 
-export function readBody(stream: Readable, maxBytes: number): Promise<Buffer> {
+export function readBody(
+  stream: Readable,
+  maxBytes: number,
+  expectedLength?: number
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    const shouldPreallocate =
+      Number.isInteger(expectedLength) &&
+      (expectedLength as number) >= 0 &&
+      (expectedLength as number) <= maxBytes
+
     const chunks: Buffer[] = []
+    const preallocated = shouldPreallocate
+      ? Buffer.allocUnsafe(expectedLength as number)
+      : null
+    let offset = 0
     let total = 0
 
-    stream.on('data', (chunk: Buffer) => {
+    const onData = (chunk: Buffer): void => {
       total += chunk.length
       if (total > maxBytes) {
+        cleanup()
         stream.destroy()
-        return reject(
-          Object.assign(new Error('Payload Too Large'), { status: 413 })
-        )
+        reject(Object.assign(new Error('Payload Too Large'), { status: 413 }))
+        return
       }
+
+      if (preallocated) {
+        chunk.copy(preallocated, offset)
+        offset += chunk.length
+        return
+      }
+
       chunks.push(chunk)
-    })
-    stream.on('end', () => resolve(Buffer.concat(chunks)))
-    stream.on('error', reject)
-    stream.on('aborted', () => {
+    }
+
+    const onEnd = (): void => {
+      cleanup()
+      if (preallocated) {
+        resolve(offset === preallocated.length ? preallocated : preallocated.subarray(0, offset))
+        return
+      }
+
+      resolve(Buffer.concat(chunks))
+    }
+
+    const onError = (error: Error): void => {
+      cleanup()
+      reject(error)
+    }
+
+    const onAborted = (): void => {
+      cleanup()
       reject(Object.assign(new Error('Request aborted'), { status: 400 }))
-    })
+    }
+
+    const cleanup = (): void => {
+      stream.off('data', onData)
+      stream.off('end', onEnd)
+      stream.off('error', onError)
+      stream.off('aborted', onAborted)
+    }
+
+    stream.on('data', onData)
+    stream.on('end', onEnd)
+    stream.on('error', onError)
+    stream.on('aborted', onAborted)
   })
 }
 
@@ -150,15 +197,16 @@ function parseSerializedBufferPayload(payload: Buffer): Buffer | null {
 
 export async function readDecodedBody(
   req: Request,
-  maxBytes: number
+  maxBytes: number,
+  expectedLength?: number
 ): Promise<Buffer> {
   const encoding = getContentEncoding(req)
 
   if (encoding === 'identity') {
-    return readBody(req, maxBytes)
+    return readBody(req, maxBytes, expectedLength)
   }
 
-  const compressed = await readBody(req, maxBytes)
+  const compressed = await readBody(req, maxBytes, expectedLength)
 
   try {
     return await decodeCompressedBuffer(compressed, encoding, maxBytes)
